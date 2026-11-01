@@ -2,12 +2,12 @@
 #include <cstdint>
 #include <vector>
 #include <string>
+#include "VideoFrame.h"
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/hwcontext.h>
 #include <libswscale/swscale.h>
 }
-struct VideoFrame { int width=0,height=0; std::vector<uint8_t> bgra; };
 class Decoder {
     AVCodecContext *context_=nullptr;
     AVFrame *frame_=nullptr,*cpu_=nullptr;

@@ -24,15 +24,26 @@ To open a paired viewer and start connecting immediately, use
 is still required. Omit `--connect` to load the pairing path without connecting.
 
 Keyboard shortcuts: F1 rotates clockwise; F2 requests 30 FPS; F3 requests 60;
-F4 requests half resolution; F5 requests native resolution; Ctrl+T focuses the
+F4 requests half resolution; F5 requests native resolution; F6 fits the window
+to the device screen on the current monitor; Ctrl+T focuses the
 text field; Esc disconnects. Enter in the kbps field changes the bitrate.
 Quality changes are applied at a frame boundary. A second simultaneous quality
 change can return a busy error; retry after the first completes.
 
+The viewer opens with its video area fitted to the device's aspect ratio,
+including after Rotate/F1. Keep ratio constrains dragging any window edge or
+corner to those proportions. Uncheck it to resize freely; the image itself
+remains proportional with letterboxing. Fit/F6 fits the image within the current
+monitor's work area, with room for the toolbar and window borders. On a small
+display the minimum toolbar width can require a little letterboxing. The
+toolbar reflows into compact rows so controls stay visible in portrait mode.
+
 Statistics show decoded FPS, **network round-trip time**, last decode time and
 the selected decoder. RTT is not end-to-end display latency. D3D11VA is attempted
 when supported, with software fallback. The initial renderer copies decoded
-pixels to system memory for GDI presentation. This is not a zero-copy GPU renderer.
+pixels to system memory for GDI presentation. Each paint is composed in a reused
+offscreen bitmap and copied to the window in one pass; background erasure does
+not clear the displayed image between frames. This is not a zero-copy GPU renderer.
 The title reports software if GPU decoding was unavailable or reset.
 
 Rotation is explicitly selected by the viewer. Input maps through the inverse

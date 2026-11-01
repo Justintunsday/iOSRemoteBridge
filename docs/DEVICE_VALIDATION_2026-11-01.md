@@ -97,8 +97,19 @@ instead of `ok: true`. The Windows callback requested a strict boolean and threw
 The correction serializes explicit Foundation booleans and lets Windows accept
 the installed prototype's exact integer 0/1 form. A native TLS regression now
 exercises repeated Home/touch RPCs, an operation rejection, another RPC and
-decoded video after all actions on the same connection. Physical Windows
-verification of that client correction is pending.
+decoded video after all actions on the same connection. The corrected Windows
+client at `55209321f261536749a8dd067d64c38b4c58d5dc`, from
+[build 41287183336](https://github.com/Justintunsday/iOSRemoteBridge/actions/runs/41287183336),
+was opened against the installed `0049e94` phone package. App Switcher showed
+app cards, Home returned to the Home Screen, and a viewer mouse click opened
+Clock. The viewer continued to display FPS/D3D11VA after these actions; the
+phone's log showed no further disconnect during that test. A final drag test
+was stopped by the owner's physical Escape key and remains unverified.
+
+The owner subsequently reported brightness flicker. The existing GDI paint
+cleared the displayed video area before every frame. Buffered presentation,
+aspect-constrained resizing and compact controls are under validation; no
+physical claim that brightness flicker is resolved is made yet.
 
 Two additional short native Python telemetry windows were collected on this
 package, on the same Wi-Fi with Low Power Mode off and nominal thermal state:
