@@ -117,8 +117,9 @@ The UI retains an immutable frame without holding the handoff mutex while
 painting. Toolbar visibility changes layout and aspect constraints. Input uses
 the video child-to-parent transform, inverse rotation and rendered letterbox.
 Focused-window shortcuts avoid local edit fields. Live HID down/up input requires
-a separate on-phone session grant. Key-up cleanup remains allowed during a
-confirmation; focus loss, mode revocation and disconnect release held keys.
+a separate on-phone session grant. Prompts release contacts/keys before taking
+focus; later cleanup of an already-released key is a no-op. Focus loss, mode
+revocation and disconnect also release held keys.
 
 Modules are separated under ios/capture, encoder, input, common and daemon;
 client decoder and connection modules are independent. CI tests production

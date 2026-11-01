@@ -87,6 +87,8 @@
 - (void)prompt:(NSString *)message decision:(void(^)(BOOL))decision {
     if(_confirming||[self locked]) { [self status:@"approval_unavailable" extra:@{}]; decision(NO); return; }
     _confirming=YES;
+    // Release old contacts/keys before the approval window can take focus.
+    [_input releaseAll];
     _previousWindow=UIApplication.sharedApplication.keyWindow;
     if(!_window) {
         UIWindowScene *selected=nil;

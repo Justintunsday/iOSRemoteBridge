@@ -116,6 +116,7 @@ static void observed(void *target,void *ref,void *service,Event event) {
 }
 - (BOOL)key:(uint16_t)usage down:(BOOL)down {
     if(usage<4||usage>231) return NO;
+    if(!down&&!_keys[usage]) return YES; // Idempotent cleanup must not activate a newly focused prompt.
     if([self sendKey:usage page:7 down:down]) { _keys[usage]=down; return YES; } return NO;
 }
 - (BOOL)button:(NSString *)button {
