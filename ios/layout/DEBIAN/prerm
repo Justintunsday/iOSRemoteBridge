@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+launchctl bootout system/io.github.justintunsday.iosremotebridge 2>/dev/null || true
+exit 0

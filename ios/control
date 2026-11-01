@@ -1,0 +1,9 @@
+Package: io.github.justintunsday.iosremotebridge
+Name: iOSRemoteBridge
+Version: 0.1.0~dev
+Architecture: iphoneos-arm64
+Description: Experimental owner-approved TLS remote desktop for rootless iOS 16
+Maintainer: Justintunsday
+Author: Justintunsday
+Section: Networking
+Depends: firmware (>= 16.1), ellekit

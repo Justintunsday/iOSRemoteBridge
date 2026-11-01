@@ -1,0 +1,57 @@
+name: build-ios
+on:
+  push:
+    branches: [main, 'feature/**']
+    paths: ['ios/**', 'shared/**', '.github/workflows/build-ios.yml']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  rootless:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      THEOS: ${{ github.workspace }}/.theos-toolchain
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: brew install ldid dpkg make
+      - name: Install pinned Theos
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init "$THEOS"
+          git -C "$THEOS" remote add origin https://github.com/theos/theos.git
+          git -C "$THEOS" fetch --depth=1 origin 6e7b8c40e0f5f9f5b2377800dc1e42cd2560d24a
+          git -C "$THEOS" checkout --detach FETCH_HEAD
+          git -C "$THEOS" submodule update --init --recursive --depth=1
+      - name: Compile and package with Xcode iPhoneOS SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build-logs
+          xcodebuild -version | tee build-logs/xcode.txt
+          export SYSROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
+          xcrun --sdk iphoneos --show-sdk-version | tee build-logs/sdk.txt
+          chmod +x ios/layout/DEBIAN/postinst ios/layout/DEBIAN/prerm
+          gmake -C ios package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless 2>&1 | tee build-logs/ios-build.log
+      - name: Inspect actual package contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          dpkg-deb --info ios/packages/*.deb | tee build-logs/package-info.txt
+          dpkg-deb --contents ios/packages/*.deb | tee build-logs/package-files.txt
+          grep -q 'var/jb/usr/bin/iosremotebridged' build-logs/package-files.txt
+          grep -q 'var/jb/Library/MobileSubstrate/DynamicLibraries/IRBSpringBoard.dylib' build-logs/package-files.txt
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: ios-rootless-deb
+          path: ios/packages/*.deb
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-build-logs
+          path: build-logs/

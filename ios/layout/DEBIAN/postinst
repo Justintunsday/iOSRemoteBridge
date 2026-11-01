@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+state=/var/jb/var/mobile/Library/iOSRemoteBridge
+if [ ! -d "$state" ]; then
+  install -d -o mobile -g mobile -m 700 "$state"
+fi
+echo 'iOSRemoteBridge installed. Provision credentials, then bootstrap the LaunchDaemon.'
+echo 'Respring once to load the SpringBoard bridge. See docs/DEVICE_TESTING.md.'
+exit 0

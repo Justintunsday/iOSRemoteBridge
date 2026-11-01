@@ -9,6 +9,7 @@ extern "C" {
 #define IRB_HEADER_SIZE 24u
 #define IRB_MAX_PAYLOAD (8u * 1024u * 1024u)
 #define IRB_MAX_CONTROL 65536u
+#define IRB_MAX_RESPONSE (2u * 1024u * 1024u)
 enum { IRB_AUTH=1, IRB_CONTROL=2, IRB_RESPONSE=3, IRB_VIDEO=4,
        IRB_PING=5, IRB_PONG=6, IRB_START=128, IRB_STOP=129, IRB_CREDIT=130 };
 typedef struct { uint8_t type, flags; uint32_t length, sequence; uint64_t pts_us; } irb_header;
@@ -31,7 +32,8 @@ static inline int irb_unpack(const uint8_t *p, size_t n, irb_header *h) {
     h->pts_us=((uint64_t)irb_get32(p+16)<<32)|irb_get32(p+20);
     if(h->flags & ~1u) return 0;
     if(h->type!=IRB_VIDEO && h->flags) return 0;
-    return h->length<=IRB_MAX_PAYLOAD && (h->type==IRB_VIDEO||h->length<=IRB_MAX_CONTROL);
+    return h->length<=IRB_MAX_PAYLOAD && (h->type==IRB_VIDEO||
+      h->length<=(h->type==IRB_RESPONSE?IRB_MAX_RESPONSE:IRB_MAX_CONTROL));
 }
 /* Displayed normalized coordinates -> natural portrait digitizer plane.
    Rotation is clockwise and explicitly chosen by the viewer. */
