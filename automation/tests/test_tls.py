@@ -46,7 +46,7 @@ class TLSTests(unittest.TestCase):
                         packet = p.Header(kind, 0, len(body), seq, pts).pack() + body
                         # Split both the header and payload across writes.
                         for i in range(0, len(packet), 7): sock.sendall(packet[i:i+7])
-                    send(p.RESPONSE, 1, {"event": "approval_required"})
+                    send(p.RESPONSE, 1, {"event": "authenticated"})
                     send(p.RESPONSE, 2, {"event": "authorized", "device": {"model": "SIMULATOR"}})
                     send(p.VIDEO, 3, b"\0\0\0\1fake-frame", 12345)
                     seq = 3

@@ -22,21 +22,21 @@ The owner confirmed corrected colors and smoother motion; see the report's limit
 - Rootless .deb containing a mobile LaunchDaemon and a SpringBoard-only library.
 - Bounded IOSurface-backed capture, native rendering/GPU scaling requests,
   VideoToolbox H.264, IDR recovery, 30/60-FPS pacing and bitrate adaptation.
-- Pinned TLS, random pairing tokens, physical owner approval, lock/expiry shutdown
-  and extra confirmation for sensitive input. No floating control overlay.
+- Pinned TLS, random pairing tokens, automatic paired-client authorization and
+  lock/expiry shutdown. No floating control overlay.
 - System-HID multi-contact API, gestures, paced US-layout ASCII text, keyboard
   presses, Home/App Switcher, volume and experimental app launch.
 - Native Win32 receiver with D3D11VA selection/software fallback, mouse/text
   control, rotation, aspect fitting, adjustable sharpening, quality controls,
   collapsible toolbar, VSync, FSR 1, an optional single-frame FSR 4/3/2.3 experiment,
-  navigation shortcuts, session-approved live keyboard input, reconnect and
+  navigation shortcuts, native iOS system mouse/keyboard input, reconnect and
   FPS/RTT/decode statistics.
 - Python API/CLI, JSON-lines adapter and optional standard MCP stdio tools.
 - GitHub Actions builds, TLS/H.264 simulator tests, validation, logs/artifacts
   and a manually gated draft-release workflow.
 
 Other input modes and private-API paths need further device testing. There is one
-approved session at a time. The transport is TLS/TCP with frame credit, not
+authenticated session at a time. The transport is TLS/TCP with frame credit, not
 Sunshine/Moonlight protocol compatibility. HEVC, audio, WebRTC, automatic app
 orientation, arbitrary Unicode, UI hierarchy and a native macOS GUI remain
 future work. ScreenCaptureKit is unavailable on iOS 16.1.1.
@@ -50,9 +50,9 @@ future work. ScreenCaptureKit is unavailable on iOS 16.1.1.
 2. Follow [DEVICE_TESTING.md](docs/DEVICE_TESTING.md) to provision over SSH,
    install the package, load the daemon and keep a recovery path available.
 3. Extract the entire Windows artifact, launch iOSRemoteBridge.exe, select the
-   local pairing JSON, connect and approve physically on the unlocked iPhone.
+   local pairing JSON and connect to the unlocked iPhone; no app approval dialog.
 4. For automation follow [AUTOMATION.md](docs/AUTOMATION.md). Viewing is the
-   default; input needs `--control` plus local approval. Lock the iPhone or
+   default; input needs `--control`; paired clients execute operations directly. Lock the iPhone or
    disconnect the client to end the session.
 
 Pairing files stay local. No Mac must remain connected after installation.
@@ -66,7 +66,7 @@ the implementation does not bypass a passcode or disable auto-lock.
 | [RESEARCH](docs/RESEARCH.md) | Pinned source analysis, API availability, licenses and technology choices |
 | [ARCHITECTURE](docs/ARCHITECTURE.md) | Actual modules, trust boundaries and frame lifetimes |
 | [COMPATIBILITY](docs/COMPATIBILITY.md) | Compile targets and runtime validation gates |
-| [SECURITY](docs/SECURITY.md) | Authentication, owner consent and threat-model limits |
+| [SECURITY](docs/SECURITY.md) | Authentication, automatic operation policy and threat-model limits |
 | [PERFORMANCE](docs/PERFORMANCE.md) | Evidence, calculated budgets and measurement procedures |
 | [CLIENT](docs/CLIENT.md) | Windows controls and source builds |
 | [AUTOMATION](docs/AUTOMATION.md) | API operations, Python and MCP |

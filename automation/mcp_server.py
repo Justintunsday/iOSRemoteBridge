@@ -25,7 +25,7 @@ class DeviceAdapter:
 
     def request(self, op, **parameters):
         if op not in READ_OPS and not self.control:
-            raise BridgeError("input disabled; start this adapter with --control and approve physically on the iPhone")
+            raise BridgeError("input disabled; start this adapter with --control on the unlocked paired iPhone")
         with self.lock:
             if self.client is None:
                 self.client = self.factory(self.config, control=self.control, timeout=60)
@@ -51,12 +51,12 @@ def create_server(adapter):
 
     @server.tool(annotations=READ)
     async def get_device_info() -> dict:
-        """Inspect device model, iOS, capture dimensions and runtime capability status. First call needs local owner approval."""
+        """Inspect device model, iOS, capture dimensions and runtime capability status. First call connects to the unlocked paired phone."""
         return await request("get_device_info")
 
     @server.tool(annotations=READ)
     async def get_screen_frame() -> Image:
-        """Inspect a current JPEG screen frame during an approved visible session. Protected output is not bypassed."""
+        """Inspect a current JPEG screen frame during an paired session. Protected output is not bypassed."""
         result = await request("get_screen_frame")
         if result["mime"] != "image/jpeg": raise BridgeError("unexpected screen image type")
         return Image(data=base64.b64decode(result["base64"], validate=True), format="jpeg")
@@ -68,7 +68,7 @@ def create_server(adapter):
 
     @server.tool(annotations=READ)
     async def get_connection_status() -> dict:
-        """Inspect this adapter's local session status without connecting or requesting new approval."""
+        """Inspect this adapter's local session status without connecting."""
         client = adapter.client
         return {"connected": client is not None and not getattr(client, "error", None),
                 "device": client.device if client else None, "input_requested": adapter.control}
@@ -80,12 +80,12 @@ def create_server(adapter):
 
     @server.tool(annotations=INPUT)
     async def tap(x: Coordinate, y: Coordinate) -> dict:
-        """Tap a normalized natural-portrait point. Requires explicit owner-approved control; supervise sensitive screens."""
+        """Tap a normalized natural-portrait point. Requires a paired control session."""
         return await request("tap", x=x, y=y)
 
     @server.tool(annotations=INPUT)
     async def double_tap(x: Coordinate, y: Coordinate) -> dict:
-        """Double tap a point in the owner-approved control session."""
+        """Double tap a point in the paired control session."""
         return await request("double_tap", x=x, y=y)
 
     @server.tool(annotations=INPUT)
@@ -100,17 +100,17 @@ def create_server(adapter):
 
     @server.tool(annotations=INPUT)
     async def type_text(text: Annotated[str, Field(max_length=1024)]) -> dict:
-        """Type supported US-layout ASCII text. Always requires an additional physical confirmation on the iPhone."""
+        """Type supported US-layout ASCII text. Executes directly in the paired control session."""
         return await request("type_text", text=text)
 
     @server.tool(annotations=INPUT)
     async def press_home() -> dict:
-        """Submit a Home button press in the approved control session."""
+        """Submit a Home button press in the paired control session."""
         return await request("press_home")
 
     @server.tool(annotations=INPUT)
     async def launch_app(bundle_id: Annotated[str, Field(min_length=1, max_length=255)]) -> dict:
-        """Request launching an installed app. Requires another physical owner confirmation; private API is experimental."""
+        """Request launching an installed app. Executes directly; private API is experimental."""
         return await request("launch_app", bundle_id=bundle_id)
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
@@ -124,7 +124,7 @@ def create_server(adapter):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True, help="absolute local pairing JSON path")
-    parser.add_argument("--control", action="store_true", help="explicitly request input; phone approval is still mandatory")
+    parser.add_argument("--control", action="store_true", help="explicitly request input; phone must be unlocked")
     args = parser.parse_args()
     adapter = DeviceAdapter(args.config, args.control)
     try: create_server(adapter).run(transport="stdio")

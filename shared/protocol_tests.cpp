@@ -20,6 +20,8 @@ int main() {
     a.type=IRB_CONTROL; a.flags=0; a.length=IRB_MAX_CONTROL+1; irb_pack(b.data(),a);
     check(!irb_unpack(b.data(),b.size(),&out));
     a.length=IRB_MAX_CONTROL; irb_pack(b.data(),a); check(irb_unpack(b.data(),b.size(),&out));
+    a.type=IRB_HID; irb_pack(b.data(),a); check(irb_unpack(b.data(),b.size(),&out));
+    a.length=IRB_MAX_CONTROL+1; irb_pack(b.data(),a); check(!irb_unpack(b.data(),b.size(),&out));
     double x=0,y=0;
     check(irb_unrotate(.2,.3,90,&x,&y)&&fabs(x-.3)<1e-9&&fabs(y-.8)<1e-9);
     check(irb_unrotate(.2,.3,270,&x,&y)&&fabs(x-.7)<1e-9&&fabs(y-.2)<1e-9);

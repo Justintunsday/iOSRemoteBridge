@@ -9,7 +9,7 @@ from .client import BridgeClient
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
-    parser.add_argument("--control", action="store_true", help="request locally approved input")
+    parser.add_argument("--control", action="store_true", help="request input on the unlocked paired phone")
     parser.add_argument("--fps", type=int, choices=(30, 60), default=30)
     parser.add_argument("operation", help="operation name, snapshot, or serve")
     parser.add_argument("--params", default="{}", help="JSON operation parameters")

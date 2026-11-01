@@ -13,6 +13,7 @@
 #import "../capture/IRBCapture.h"
 #import "../encoder/IRBEncoder.h"
 #import "../input/IRBInput.h"
+#import <dlfcn.h>
 #include "../../shared/irb_frame_window.h"
 
 @interface IRBBridge : NSObject
@@ -24,12 +25,15 @@
     IRBEncoder *_encoder;
     IRBInput *_input;
     CADisplayLink *_display;
-    UIWindow *_window,*_previousWindow;
+    id _axSettings;
+    BOOL _assistiveChanged,_menuChanged;
+    NSMutableDictionary<NSNumber *,NSDictionary *> *_nativeRequests;
+    uint64_t _session;
     CIContext *_ci;
     CVPixelBufferRef _lastFrame;
-    BOOL _connecting,_approved,_control,_confirming,_forceKey;
+    BOOL _connecting,_approved,_control,_forceKey;
     BOOL _snapshotPending,_keyboardEnabled;
-    uint64_t _deadline,_generation,_keyboardGeneration,_frames,_skipped,_started,_lastVideoPTS;
+    uint64_t _deadline,_generation,_frames,_skipped,_started,_lastVideoPTS;
     irb_frame_window _videoWindow;
     unsigned _windowLimit;
     NSMutableSet<NSNumber *> *_encodingPTS;
@@ -84,61 +88,52 @@
 - (void)reply:(NSDictionary *)request result:(id)result error:(NSString *)error {
     [self send:IRBReply(request,result,error)];
 }
-- (void)prompt:(NSString *)message decision:(void(^)(BOOL))decision {
-    if(_confirming||[self locked]) { [self status:@"approval_unavailable" extra:@{}]; decision(NO); return; }
-    _confirming=YES;
-    // Release old contacts/keys before the approval window can take focus.
-    [_input releaseAll];
-    _previousWindow=UIApplication.sharedApplication.keyWindow;
-    if(!_window) {
-        UIWindowScene *selected=nil;
-        for(UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-            if(![scene isKindOfClass:UIWindowScene.class]) continue;
-            if(scene.activationState==UISceneActivationStateForegroundActive) { selected=(UIWindowScene *)scene; break; }
-            if(!selected) selected=(UIWindowScene *)scene;
-        }
-        _window=selected?[[UIWindow alloc] initWithWindowScene:selected]:[[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+- (BOOL)prepareSystemPointer {
+    if(!_axSettings) {
+        dlopen("/System/Library/PrivateFrameworks/AccessibilityUtilities.framework/AccessibilityUtilities",RTLD_NOW);
+        Class cls=NSClassFromString(@"AXSettings"); SEL shared=NSSelectorFromString(@"sharedInstance");
+        if([cls respondsToSelector:shared]) _axSettings=((id(*)(id,SEL))objc_msgSend)(cls,shared);
     }
-    _window.frame=UIScreen.mainScreen.bounds; _window.windowLevel=UIWindowLevelAlert+20;
-    _window.rootViewController=[UIViewController new];
-    _window.rootViewController.view.backgroundColor=[UIColor colorWithWhite:0 alpha:.15];
-    [_window makeKeyAndVisible];
-    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"iOSRemoteBridge"
-        message:message preferredStyle:UIAlertControllerStyleAlert];
-    uint64_t generation=_generation;
-    void(^finish)(BOOL)=^(BOOL allow) {
-        if(generation!=self->_generation) return;
-        self->_confirming=NO; [self->_previousWindow makeKeyWindow];
-        [self status:allow?@"owner_allowed":@"owner_declined_or_timed_out" extra:@{}];
-        self->_window.hidden=YES; self->_window=nil; self->_previousWindow=nil;
-        decision(allow);
-    };
-    [alert addAction:[UIAlertAction actionWithTitle:@"Reject" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a) { (void)a; finish(NO); }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Allow" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) { (void)a; finish(YES); }]];
-    [self status:@"approval_window_created" extra:@{@"has_window_scene":@(_window.windowScene!=nil),
-          @"is_key":@(_window.isKeyWindow),@"hidden":@(_window.hidden)}];
-    dispatch_async(dispatch_get_main_queue(),^{
-        if(generation!=self->_generation||!self->_confirming) return;
-        [self->_window.rootViewController presentViewController:alert animated:YES completion:^{
-            [self status:@"approval_presented" extra:@{}];
-        }];
-    });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,45*NSEC_PER_SEC),dispatch_get_main_queue(),^{
-        if(self->_confirming&&generation==self->_generation) {
-            [alert dismissViewControllerAnimated:NO completion:nil]; finish(NO);
-        }
-    });
+    SEL get=NSSelectorFromString(@"assistiveTouchEnabled"),set=NSSelectorFromString(@"setAssistiveTouchEnabled:");
+    if(![_axSettings respondsToSelector:get]||![_axSettings respondsToSelector:set]) return NO;
+    if(!((BOOL(*)(id,SEL))objc_msgSend)(_axSettings,get)) {
+        _assistiveChanged=YES; ((void(*)(id,SEL,BOOL))objc_msgSend)(_axSettings,set,YES);
+    }
+    SEL menu=NSSelectorFromString(@"assistiveTouchAlwaysShowMenu"),setMenu=NSSelectorFromString(@"setAssistiveTouchAlwaysShowMenu:");
+    if([_axSettings respondsToSelector:menu]&&[_axSettings respondsToSelector:setMenu]&&
+       ((BOOL(*)(id,SEL))objc_msgSend)(_axSettings,menu)) {
+        _menuChanged=YES; ((void(*)(id,SEL,BOOL))objc_msgSend)(_axSettings,setMenu,NO);
+    }
+    return YES;
+}
+- (void)restoreSystemPointer {
+    // Restore settings that this session changed; retain the owner's existing
+    // AssistiveTouch configuration and do not overwrite later manual changes.
+    SEL get=NSSelectorFromString(@"assistiveTouchEnabled"),set=NSSelectorFromString(@"setAssistiveTouchEnabled:");
+    if(_assistiveChanged&&((BOOL(*)(id,SEL))objc_msgSend)(_axSettings,get))
+        ((void(*)(id,SEL,BOOL))objc_msgSend)(_axSettings,set,NO);
+    SEL menu=NSSelectorFromString(@"assistiveTouchAlwaysShowMenu"),setMenu=NSSelectorFromString(@"setAssistiveTouchAlwaysShowMenu:");
+    if(_menuChanged&&!((BOOL(*)(id,SEL))objc_msgSend)(_axSettings,menu))
+        ((void(*)(id,SEL,BOOL))objc_msgSend)(_axSettings,setMenu,YES);
+    _assistiveChanged=_menuChanged=NO;
+}
+- (void)nativeRequest:(NSDictionary *)r {
+    if(!_nativeRequests) _nativeRequests=[NSMutableDictionary new];
+    if(_nativeRequests.count>=256||_nativeRequests[r[@"id"]]) {
+        [self reply:r result:nil error:@"native HID request queue full or duplicate id"]; return;
+    }
+    _nativeRequests[r[@"id"]]=r;
+    [_peer send:IRB_HID flags:0 pts:_session data:IRBJSON(r)];
 }
 - (void)stopSession:(NSString *)reason {
-    BOOL was=_approved||_confirming;
+    BOOL was=_approved;
     [self status:@"stopped" extra:@{@"reason":reason}];
-    _approved=NO; _confirming=NO; _keyboardEnabled=NO; ++_generation; ++_keyboardGeneration;
+    _approved=NO; _keyboardEnabled=NO; ++_generation;
+    [_nativeRequests removeAllObjects]; [self restoreSystemPointer];
     [_display invalidate]; _display=nil;
     if(_gesture) { dispatch_source_cancel(_gesture); _gesture=nil; }
     [_input releaseAll]; [_encoder stop]; _encoder=nil; _capture=nil;
     if(_lastFrame) { CVPixelBufferRelease(_lastFrame); _lastFrame=NULL; }
-    [_window.rootViewController dismissViewControllerAnimated:NO completion:nil];
-    _window.hidden=YES; [_previousWindow makeKeyWindow]; _window=nil;
     [_encodingPTS removeAllObjects]; irb_window_init(&_videoWindow,1);
     UIDevice.currentDevice.batteryMonitoringEnabled=NO;
     _pendingConfiguration=nil;
@@ -192,7 +187,7 @@
     for(NSNumber *pts in _encodingPTS) if(IRBNow()-pts.unsignedLongLongValue>2000000) {
         [self stopSession:@"encoder callback timed out"]; return;
     }
-    if(!irb_window_available(&_videoWindow)||_encodingPTS.count>=MIN(_videoWindow.limit,2u)||_confirming||_pendingConfiguration) { ++_skipped; return; }
+    if(!irb_window_available(&_videoWindow)||_encodingPTS.count>=MIN(_videoWindow.limit,2u)||_pendingConfiguration) { ++_skipped; return; }
     uint64_t start=IRBNow(); CVPixelBufferRef frame=[_capture copyFrame]; _captureMs=(IRBNow()-start)/1000.0;
     if(!frame) { if(++_failures>=3) [self stopSession:_capture.error?:@"capture failed"]; return; }
     _slow=_captureMs>25?_slow+1:0;
@@ -210,12 +205,23 @@
     return @{@"model":[NSString stringWithUTF8String:u.machine],@"ios":UIDevice.currentDevice.systemVersion,
         @"width":@(_capture.width),@"height":@(_capture.height),@"fps_requested":@(_fps),
         @"video_window":@(_videoWindow.limit),
-        @"control":@(_control),@"keyboard_enabled":IRBBool(_keyboardEnabled),@"orientation":@"natural_portrait",@"input_status":_input.status,
+        @"control":@(_control),@"keyboard_enabled":IRBBool(_keyboardEnabled),@"keyboard_backend":@"IOHIDUserDevice",@"approval_policy":@"paired_client_automatic",@"orientation":@"natural_portrait",@"input_status":_input.status,
         @"input_diagnostics":_input.diagnostics,
         @"hardware_encoder":_encoder.hardwareStatus?:@"unknown",@"low_latency_mode":@(_encoder.lowLatency),
         @"runtime_verified":@NO};
 }
 - (void)received:(irb_header)h data:(NSData *)data {
+    if(h.type==IRB_HID) {
+        if(!_approved||h.pts_us!=_session) return;
+        NSDictionary *reply=IRBDictionary(data); NSNumber *ident=IRBNumber(reply[@"id"]);
+        NSDictionary *request=ident?_nativeRequests[ident]:nil; if(!request) return;
+        [_nativeRequests removeObjectForKey:ident];
+        if([request[@"op"] isEqual:@"keyboard_mode"]) {
+            _keyboardEnabled=[reply[@"ok"] boolValue]&&[reply[@"result"][@"keyboard_enabled"] boolValue];
+            if(!_keyboardEnabled) [self restoreSystemPointer];
+        }
+        [self send:reply]; return;
+    }
     if(h.type==IRB_STOP) { [self stopSession:@"connection ended"]; return; }
     if(h.type==IRB_CREDIT) {
         if(!_approved) return;
@@ -227,21 +233,20 @@
         return;
     }
     if(h.type==IRB_START) {
-        if(_approved||_confirming) return;
+        if(_approved) return;
+        if([self locked]) {
+            [_peer send:IRB_STOP flags:0 pts:0 data:IRBJSON(@{@"reason":@"unlock the iPhone before connecting"})]; return;
+        }
         NSDictionary *options=IRBDictionary(data);
         _fps=[IRBNumber(options[@"fps"]) intValue]==60?60:30;
         unsigned requested=[IRBNumber(options[@"video_window"]) unsignedIntValue];
         _windowLimit=requested>=1&&requested<=IRB_MAX_VIDEO_WINDOW?requested:1;
+        _session=[IRBNumber(options[@"session"]) unsignedLongLongValue];
         _bitrate=8000000; _scale=1; _control=[IRBNumber(options[@"control"]) boolValue];
-        uint64_t generation=++_generation;
-        NSString *message=_control?@"An authenticated remote requests screen viewing and system-wide input for 15 minutes. Supervise sensitive screens. Text, keyboard and app launches ask again locally. Lock the iPhone or disconnect the client to end the session.":@"An authenticated remote requests screen viewing for 15 minutes. Lock the iPhone or disconnect the client to end the session.";
-        [self prompt:message decision:^(BOOL allowed) {
-            if(generation!=self->_generation) return;
-            if(!allowed) { [self->_peer send:IRB_STOP flags:0 pts:0 data:IRBJSON(@{@"reason":@"owner declined"})]; return; }
-            self->_approved=YES; self->_deadline=IRBNow()+900000000ULL;
-            if(![self startPipeline]) { [self stopSession:@"pipeline failed"]; return; }
-            [self send:@{@"event":@"authorized",@"device":[self info]}];
-        }];
+        ++_generation; _approved=YES; _deadline=IRBNow()+900000000ULL;
+        if(![self startPipeline]) { [self stopSession:@"pipeline failed"]; return; }
+        [self status:@"paired_session_started" extra:@{@"control":IRBBool(_control),@"approval_policy":@"paired_client_automatic"}];
+        [self send:@{@"event":@"authorized",@"device":[self info]}];
         return;
     }
     if(h.type!=IRB_CONTROL||!_approved) return;
@@ -285,34 +290,20 @@
     }
     if([op isEqual:@"request_keyframe"]) { _forceKey=YES; [self reply:r result:@{} error:nil]; return; }
     if([op isEqual:@"keyboard_mode"]&&![r[@"enabled"] boolValue]) {
-        ++_keyboardGeneration; _keyboardEnabled=NO; [_input releaseKeys];
-        [self reply:r result:@{@"keyboard_enabled":@NO} error:nil]; return;
+        _keyboardEnabled=NO; [_input releaseKeys]; [self nativeRequest:r]; return;
     }
-    if([op isEqual:@"key_event"]) {
-        BOOL down=[r[@"down"] boolValue];
-        // Key-up is cleanup, even while a prompt pauses new input.
-        if(!_control||!_keyboardEnabled||(down&&(_confirming||[self locked]))) {
-            [self reply:r result:nil error:@"live keyboard mode needs separate local approval and an unlocked phone"]; return;
-        }
-        BOOL ok=[_input key:[r[@"usage"] unsignedShortValue] down:down];
-        [self reply:r result:@{@"state":@"submitted"} error:ok?nil:@"keyboard HID unavailable"]; return;
+    if(!_control||[self locked]) { [self reply:r result:nil error:@"input disabled or phone locked"]; return; }
+    if([op isEqual:@"key_event"]||[op isEqual:@"mouse_event"]) {
+        if(!_keyboardEnabled) { [self reply:r result:nil error:@"enable System mouse+keyboard (F10) first"]; return; }
+        [self nativeRequest:r]; return;
     }
-    if(!_control||_confirming||_gesture||[self locked]) { [self reply:r result:nil error:@"input disabled, confirmation pending, locked, or gesture busy"]; return; }
+    if(_gesture) { [self reply:r result:nil error:@"gesture busy"]; return; }
     if([op isEqual:@"keyboard_mode"]) {
-        if(_keyboardEnabled) { [self reply:r result:@{@"keyboard_enabled":@YES} error:nil]; return; }
-        uint64_t generation=_generation,keyboardGeneration=++_keyboardGeneration;
-        [self prompt:@"Allow live hardware-keyboard input for this approved session? While enabled, individual key presses will not ask again. Lock the iPhone, disconnect, or turn off Keyboard+mouse to revoke this mode." decision:^(BOOL allow) {
-            if(generation!=self->_generation) return;
-            self->_keyboardEnabled=allow&&keyboardGeneration==self->_keyboardGeneration;
-            [self reply:r result:@{@"keyboard_enabled":IRBBool(self->_keyboardEnabled)} error:nil];
-        }]; return;
-    }
-    if([op isEqual:@"type_text"]||[op isEqual:@"key"]||[op isEqual:@"launch_app"]) {
-        uint64_t generation=_generation;
-        [self prompt:[NSString stringWithFormat:@"Confirm remote %@. Input is paused until you decide on the iPhone. Never approve sensitive actions you did not request.",op] decision:^(BOOL allow) {
-            if(generation!=self->_generation) return;
-            if(allow) [self execute:r]; else [self reply:r result:nil error:@"owner declined or approval timed out"];
-        }]; return;
+        [_input releaseAll];
+        if(![self prepareSystemPointer]) {
+            [self reply:r result:nil error:@"AssistiveTouch settings API unavailable on this iOS version"]; return;
+        }
+        [self nativeRequest:r]; return;
     }
     [self execute:r];
 }
@@ -358,7 +349,7 @@
     [self reply:r result:[self info] error:nil];
 }
 - (void)snapshot:(NSDictionary *)r {
-    if(!_lastFrame||_confirming||_snapshotPending) { [self reply:r result:nil error:@"frame unavailable or snapshot busy"]; return; }
+    if(!_lastFrame||_snapshotPending) { [self reply:r result:nil error:@"frame unavailable or snapshot busy"]; return; }
     _snapshotPending=YES;
     if(!_ci) _ci=[CIContext contextWithOptions:@{kCIContextUseSoftwareRenderer:@NO,kCIContextCacheIntermediates:@NO}];
     CIContext *context=_ci;

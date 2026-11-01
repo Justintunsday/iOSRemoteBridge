@@ -11,18 +11,15 @@ not silently copied from the build machine into this artifact.
 1. Generate pairing files with `python tools/provision.py --host IPHONE_WIFI_IP`.
 2. Follow DEVICE_TESTING.md to provision the iPhone over SSH and start the daemon.
 3. Open iOSRemoteBridge.exe, choose client-config.json, then Connect.
-4. Approve the request physically on the unlocked iPhone. No floating control
-   button covers the screen. Lock the phone, click Disconnect or press Esc
-   to end the session. Every reconnect asks again.
-5. Drag with the mouse for touch input. Two clicks produce a double tap. Hold
-   the mouse button for a long press. Home, App switcher and volume have buttons.
-6. Use Send text for US-layout ASCII text; the iPhone asks for separate approval.
-   Arbitrary Unicode text is not implemented. Raw HID keys are exposed through
-   the automation API and also require local confirmation.
+4. Keep the iPhone unlocked. Paired clients start immediately without an
+   iOSRemoteBridge Allow/Reject dialog. Lock the phone, click Disconnect or press
+   Esc to end the session. No floating remote-control button covers the screen.
+5. Drag with the mouse for touch input. Home, App switcher and volume have buttons.
+6. Send text types US-layout ASCII directly. Arbitrary Unicode is not implemented.
 
 To open a paired viewer and start connecting immediately, use
-`iOSRemoteBridge.exe PATH_TO_CLIENT_CONFIG_JSON --connect`. Local iPhone approval
-is still required. Omit `--connect` to load the pairing path without connecting.
+`iOSRemoteBridge.exe PATH_TO_CLIENT_CONFIG_JSON --connect`.
+Omit `--connect` to load the pairing path without connecting.
 
 The interactive viewer requests 60 FPS and a three-frame window by default.
 The capture/encode/network path still determines the achieved decoded FPS;
@@ -76,19 +73,27 @@ complete game-style FSR integration. It uses DX12 conversion/upload/readback
 before D3D11 presentation and can reduce FPS or add latency. The stable renderer
 continues if no provider works. Enlarge the image or request F4 to exercise it.
 
-With Keyboard+mouse off, H opens Home, C opens Control Center, + / - change
+With System mouse+keys off, H opens Home, C opens Control Center, + / - change
 volume, and Up / Down perform upward/downward swipes. Local pairing, text and
 bitrate fields, and the sharpness slider, keep their normal keyboard behavior.
 Mouse wheel scrolling is available over the video.
 
-Keyboard+mouse / F10 requests separate approval on the iPhone for live HID key
-down/up events for this connection. After Allow, focus the video to type; H/C
-then type characters instead of navigation shortcuts. Mouse clicks/drags remain
-touches, the wheel scrolls, and right-click performs a long press. F1–F10 and Esc
-remain local controls. F9 or the title-bar menu restores hidden tools. Switching
-focus releases held keys. Turning the mode off, locking, or disconnecting revokes
-the grant; reconnecting requires approval again. This is US-layout HID input,
-without host IME composition/Unicode text transfer or a native iOS mouse pointer.
+System mouse+keys / F10 creates an iOS virtual HID mouse and keyboard. It enables
+AssistiveTouch for the system pointer and temporarily hides its persistent menu
+button. There is no extra approval prompt. Focus the video to type; H/C then type
+characters. Mouse hover moves the system pointer, buttons and wheel go through
+native mouse reports, and a held left button drags. Right/middle buttons follow
+iOS AssistiveTouch button assignments. Absolute positioning and relative button
+reports are separate, since iOS treats these services differently.
+
+F1–F10 and Esc remain local viewer controls. F9 or the title-bar menu restores
+hidden tools. Focus loss releases held keys and mouse buttons. Turning the mode
+off, locking or disconnecting releases and removes the virtual device, and
+restores the AssistiveTouch settings changed by this session. Reconnect starts
+with the mode off. This is a six-key US-layout hardware keyboard with modifiers;
+host IME composition and arbitrary Unicode text transfer are not implemented.
+Windows may retain system-reserved key combinations. If native-device creation
+fails, the error is shown and the checkbox stays off.
 
 Statistics show decoded FPS, **network round-trip time**, last decode time and
 the selected decoder. RTT is not end-to-end display latency. D3D11VA is attempted
@@ -115,7 +120,7 @@ checks both ranges using software and the available hardware decoder.
 Rotation is explicitly selected by the viewer. Input maps through the inverse
 rotation and letterboxing into the natural portrait digitizer plane. Automatic
 foreground-app orientation tracking is not yet implemented. Multi-touch is
-available through the API; this mouse UI controls one contact.
+available through the API; the default touch mode controls one contact; F10 uses native mouse reports.
 
 The client reconnects with bounded backoff, discards queued input on disconnect,
 and never replays a gesture. A certificate pin mismatch must be investigated;

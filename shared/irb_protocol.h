@@ -11,7 +11,8 @@ extern "C" {
 #define IRB_MAX_CONTROL 65536u
 #define IRB_MAX_RESPONSE (2u * 1024u * 1024u)
 enum { IRB_AUTH=1, IRB_CONTROL=2, IRB_RESPONSE=3, IRB_VIDEO=4,
-       IRB_PING=5, IRB_PONG=6, IRB_START=128, IRB_STOP=129, IRB_CREDIT=130 };
+       IRB_PING=5, IRB_PONG=6, IRB_START=128, IRB_STOP=129, IRB_CREDIT=130,
+       IRB_HID=131 }; // Local IPC only; never accepted from the network.
 typedef struct { uint8_t type, flags; uint32_t length, sequence; uint64_t pts_us; } irb_header;
 static inline uint32_t irb_get32(const uint8_t *p) {
     return ((uint32_t)p[0]<<24)|((uint32_t)p[1]<<16)|((uint32_t)p[2]<<8)|p[3];
@@ -27,7 +28,7 @@ static inline void irb_pack(uint8_t p[IRB_HEADER_SIZE], irb_header h) {
 static inline int irb_unpack(const uint8_t *p, size_t n, irb_header *h) {
     if(n<IRB_HEADER_SIZE || p[0]!='I'||p[1]!='R'||p[2]!='B'||p[3]!='1'||p[4]!=1||p[7]!=0) return 0;
     if(p[5]!=IRB_AUTH&&p[5]!=IRB_CONTROL&&p[5]!=IRB_RESPONSE&&p[5]!=IRB_VIDEO&&
-       p[5]!=IRB_PING&&p[5]!=IRB_PONG&&p[5]!=IRB_START&&p[5]!=IRB_STOP&&p[5]!=IRB_CREDIT) return 0;
+       p[5]!=IRB_PING&&p[5]!=IRB_PONG&&p[5]!=IRB_START&&p[5]!=IRB_STOP&&p[5]!=IRB_CREDIT&&p[5]!=IRB_HID) return 0;
     h->type=p[5]; h->flags=p[6]; h->length=irb_get32(p+8); h->sequence=irb_get32(p+12);
     h->pts_us=((uint64_t)irb_get32(p+16)<<32)|irb_get32(p+20);
     if(h->flags & ~1u) return 0;

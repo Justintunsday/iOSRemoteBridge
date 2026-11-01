@@ -34,18 +34,19 @@ AUTH field and retains its one-frame behavior. Credits remain ordered per frame.
 | long_press | x, y, duration_ms (40..5000) |
 | swipe | x, y, to_x, to_y, duration_ms (40..5000) |
 | touch | finger (0..9), phase (0 down / 1 move / 2 up), x, y |
-| type_text | text, maximum 1024 US-layout ASCII characters; separate local approval |
-| key | usage (USB keyboard page 0x07, 4..231); one press/release; separate local approval |
-| keyboard_mode | enabled (JSON boolean); enabling asks locally for a session-scoped live-keyboard grant; disabling releases keys and revokes it |
-| key_event | usage (4..231), down (JSON boolean); needs the live-keyboard grant, never replays on reconnect |
+| type_text | text, maximum 1024 US-layout ASCII characters; executes directly in a control session |
+| key | usage (USB keyboard page 0x07, 4..231); one press/release; executes directly in a control session |
+| keyboard_mode | enabled (JSON boolean); enables native iOS HID mouse/keyboard and AssistiveTouch without a prompt; disabling releases/removes the device |
+| key_event | usage (4..231), down (JSON boolean); needs keyboard_mode enabled, never replays on reconnect |
 | press_home / app_switcher / control_center | no parameters; guarded SpringBoard navigation handlers |
 | volume_up / volume_down | no parameters; device delivery needs verification |
-| launch_app | bundle_id; dynamic workspace API; separate local approval |
+| mouse_event | x/y (0..1), buttons (bitmask 0..31), wheel (-127..127); needs keyboard_mode enabled |
+| launch_app | bundle_id; dynamic workspace API; executes directly in a control session |
 | configure | bitrate (500000..20000000); optional fps (30/60) and scale (.25..1) together |
 | request_keyframe | no parameters; recovery IDR |
 
 The default Python connection requests viewing only; pass control=True or
-`--control` to request input. The phone still requires physical approval. The
+`--control` to request input. The paired client starts directly while the phone is unlocked. The
 service intentionally permits one session at a time, so the GUI and a separate
 automation process cannot control it concurrently. Use one persistent adapter
 for a sequence of agent actions rather than reconnecting for each tool call.
@@ -76,13 +77,12 @@ python -m automation.mcp_server --config ABSOLUTE_PATH_TO_CLIENT_CONFIG_JSON
 Use that command and argument array in an MCP-capable host such as Codex or
 OpenCode; host-specific setup is separate. Pass `--control` only when input
 tools should be enabled. MCP initializes and lists tools before any device
-connection; the first screen/device tool call requests local owner approval.
-Allow at least 60 seconds for that first call. The server has no local HTTP
+connection; the first screen/device tool call connects to the unlocked paired phone. The server has no local HTTP
 listener and writes protocol traffic only to stdout. Tokens stay in the local
 pairing file. Screen inspection returns an MCP image content block.
 
 Read-only and potentially destructive tool annotations distinguish inspection
-from input. These hints do not replace the on-device consent checks. The SDK
+from input. These hints do not replace pairing authentication and the on-device control/lock checks. The SDK
 also validates coordinate and duration schemas before dispatch. CI verifies MCP
 tool discovery, routing, image content, invalid-coordinate rejection and the
 read-only gate with a simulated device adapter. No Codex/OpenCode-to-iPhone
@@ -90,6 +90,6 @@ physical integration has been claimed. SDK API usage follows the
 [official v2 SDK](https://github.com/modelcontextprotocol/python-sdk/tree/v2.3.0).
 
 All screen/input operations remain experimental on the target until physical
-testing is recorded. Owner consent, lock shutdown and the session deadline apply
+testing is recorded. Pairing authentication, lock shutdown and the session deadline apply
 equally to human clients and AI agents. A tool's `submitted`/`completed` state
 describes injection scheduling, not proof that a UI action had the desired effect.

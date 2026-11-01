@@ -11,6 +11,7 @@
 #import <signal.h>
 #import "../common/IRBLocalPeer.h"
 #import "../common/IRBValidation.h"
+#import "../input/IRBNativeHID.h"
 #include "../../shared/irb_frame_window.h"
 
 static NSData *privateFile(NSString *path,NSUInteger max) {
@@ -49,6 +50,7 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
     int _adaptiveBitrate,_bitrateCeiling;
     uint64_t _lastAdapt;
     int _localSocket;
+    IRBNativeHID *_nativeHID;
 }
 - (BOOL)start {
     _config=IRBDictionary(privateFile(IRB_DIRECTORY @"/device-config.json",IRB_MAX_CONTROL));
@@ -82,7 +84,7 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
     __weak IRBServer *weak=self;
     nw_listener_set_state_changed_handler(_listener,^(nw_listener_state_t state,nw_error_t error) {
         if(state==nw_listener_state_failed) { NSLog(@"[IRB] Listener failed: %d",nw_error_get_error_code(error)); exit(1); }
-        if(state==nw_listener_state_ready) NSLog(@"[IRB] TLS listener ready; capture requires local owner consent.");
+        if(state==nw_listener_state_ready) NSLog(@"[IRB] TLS listener ready; paired clients connect automatically while unlocked.");
     });
     nw_listener_set_new_connection_handler(_listener,^(nw_connection_t c) { [weak acceptNetwork:c]; });
     if(![self startLocal]) return NO;
@@ -141,6 +143,7 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
     }); nw_connection_start(c);
 }
 - (void)disconnect:(NSString *)reason {
+    [_nativeHID stop]; _nativeHID=nil;
     if(!_connection) return;
     nw_connection_t c=_connection; _connection=nil; ++_generation;
     _authenticated=NO; _authorized=NO; irb_window_init(&_videoWindow,1); _received=nil; _pendingBytes=0;
@@ -191,13 +194,13 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
             NSDictionary *auth=IRBDictionary(data);
             if(!tokenEqual(auth[@"token"],_config[@"token"])) { _cooldown=now+3000000; [self disconnect:@"authentication failed"]; return; }
             _authenticated=YES;
-            [self send:IRB_RESPONSE flags:0 pts:0 data:IRBJSON(@{@"event":@"approval_required"})];
+            [self send:IRB_RESPONSE flags:0 pts:0 data:IRBJSON(@{@"event":@"authenticated"})];
             BOOL control=[auth[@"control"] isKindOfClass:NSNumber.class]&&[auth[@"control"] boolValue];
             int fps=([auth[@"fps"] isKindOfClass:NSNumber.class]&&[auth[@"fps"] intValue]==60)?60:30;
             unsigned requested=[IRBNumber(auth[@"video_window"]) unsignedIntValue];
             unsigned window=requested>=1&&requested<=IRB_MAX_VIDEO_WINDOW?requested:1;
             irb_window_init(&_videoWindow,window);
-            [_bridge send:IRB_START flags:0 pts:0 data:IRBJSON(@{@"control":@(control),@"fps":@(fps),@"video_window":@(window)})];
+            [_bridge send:IRB_START flags:0 pts:0 data:IRBJSON(@{@"control":@(control),@"fps":@(fps),@"video_window":@(window),@"session":@(_generation)})];
         } else if(h.type==IRB_PING) [self send:IRB_PONG flags:0 pts:h.pts_us data:data];
         else if(h.type==IRB_CREDIT) {
             if(!_authorized||h.length||!irb_window_ack(&_videoWindow,h.pts_us)) { [self disconnect:@"invalid frame acknowledgement"]; return; }
@@ -231,6 +234,30 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
     }
 }
 - (void)fromBridge:(irb_header)h data:(NSData *)data {
+    if(h.type==IRB_HID) {
+        // Only SpringBoard can forward these after checking control and lock
+        // state. Bind the local request to this TLS connection's generation.
+        if(!_authenticated||!_authorized||h.pts_us!=_generation) return;
+        NSDictionary *r=IRBDictionary(data); NSString *op=r[@"op"];
+        if(!IRBValidateRequest(r,NO)) return;
+        BOOL ok=NO; NSDictionary *result=nil;
+        if([op isEqual:@"keyboard_mode"]) {
+            if([r[@"enabled"] boolValue]) {
+                if(!_nativeHID) _nativeHID=[IRBNativeHID new];
+                ok=[_nativeHID start];
+            } else { [_nativeHID stop]; ok=YES; }
+            NSMutableDictionary *mode=[[_nativeHID diagnostics] mutableCopy]?:[NSMutableDictionary new];
+            mode[@"keyboard_enabled"]=IRBBool(ok&&_nativeHID.active); result=mode;
+        } else if([op isEqual:@"key_event"]) {
+            ok=[_nativeHID key:[r[@"usage"] unsignedShortValue] down:[r[@"down"] boolValue]];
+        } else if([op isEqual:@"mouse_event"]) {
+            ok=[_nativeHID mouseX:IRBReal(r[@"x"]) y:IRBReal(r[@"y"]) buttons:[r[@"buttons"] unsignedCharValue] wheel:[r[@"wheel"] charValue]];
+        } else return;
+        if(!result) result=@{@"state":@"submitted",@"delivery_verified":@NO,@"hid":[_nativeHID diagnostics]?:@{}};
+        NSString *error=ok?nil:(_nativeHID.error?:@"native HID mode is disabled");
+        [_bridge send:IRB_HID flags:0 pts:h.pts_us data:IRBJSON(IRBReply(r,result,error))];
+        return;
+    }
     if(h.type==IRB_STOP) {
         // disconnect: already cleared the connection before asking the bridge
         // to stop. Its acknowledgement must not extend a normal reconnect delay

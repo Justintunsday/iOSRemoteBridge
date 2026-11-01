@@ -8,24 +8,33 @@ flowchart LR
   C --> V[VideoToolbox H.264]
   V --> D
   S --> H[IOHID system input]
-  S --> O[Physical approval, lock and session expiry]
+  S --> O[Lock and session expiry]
+  D --> N[Entitled IOHIDUserDevice mouse and keyboard]
 ```
 
 The daemon owns the network listener, authentication, framing, rate limits and
 connection recovery. It runs as mobile, not root. The injected library loads
 only in SpringBoard and does not hook application methods. It owns capture,
-hardware-encoder requests, input state, consent and a 15-minute session lease.
+hardware-encoder requests, input state, lock checks and a 15-minute session lease.
 Encoding remains in SpringBoard in this prototype: moving it to the daemon
 requires validated IOSurface Mach-right IPC and is a later isolation improvement.
 Untrusted network/crypto handling is already outside SpringBoard.
 
 After pinned TLS, the client sends its random 256-bit token and requests viewing
-or control. The daemon forwards a consent request to SpringBoard. No video or
-input is available until the owner taps Allow physically. The approval window
-is released afterward; no floating control button covers the phone screen.
-Lock, expiry, disconnect, respring, timeout or repeated pipeline errors stop it. Sensitive
-text, a HID key press and application launches need another local confirmation;
-remote input is disabled while that confirmation is displayed.
+or control. The daemon forwards the authenticated session to SpringBoard, which
+starts immediately if the phone is unlocked. There are no custom connection or
+per-action approval dialogs. No floating control button covers the phone screen.
+Lock, expiry, disconnect, respring, timeout or repeated pipeline errors stop it.
+
+F10 uses an entitled IOHIDUserDevice in the mobile daemon. SpringBoard controls
+AssistiveTouch and validates every native input request before forwarding it over
+local-only IRB_HID messages. Their timestamp field carries the TLS connection
+generation; stale-session requests are ignored. Keyboard report 1 carries modifiers
+and up to six keys; report 2 carries absolute pointer coordinates; report 3 carries
+native relative-mouse buttons and wheel. These are system mouse/keyboard services,
+not digitizer reports. Device removal releases all input. Native support is
+runtime checked and failures remain visible. Original touch automation remains
+available outside this mode.
 
 Capture renders the native display into a bounded CVPixelBufferPool with
 IOSurface backing. It does not treat IOSurface allocation as framebuffer access.

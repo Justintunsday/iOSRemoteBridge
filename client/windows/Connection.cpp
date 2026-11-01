@@ -110,7 +110,7 @@ void Connection::session() {
     double rtt=0,decodeMS=0; bool waitForKey=false,writeWantsRead=false,readWantsWrite=false;
     while(!stop_) {
         uint64_t now=nowUS();
-        if(now-lastData>65000000ULL||(!authorized_&&now-connected>60000000ULL)) throw std::runtime_error("connection/approval timed out");
+        if(now-lastData>65000000ULL||(!authorized_&&now-connected>60000000ULL)) throw std::runtime_error("connection/startup timed out");
         if(now-lastPing>1000000) { enqueue(IRB_PING,"",now); lastPing=now; }
         if(authorized_) {
             std::deque<json> requests;
@@ -146,7 +146,7 @@ void Connection::session() {
             if(header.type==IRB_PONG) rtt=(nowUS()-header.pts_us)/1000.0;
             else if(header.type==IRB_RESPONSE) {
                 auto reply=json::parse(payload,payload+header.length);
-                if(reply.value("event",std::string())=="authorized") { authorized_=true; if(onAuthorization) onAuthorization(true); if(onStatus) onStatus("Approved - streaming"); }
+                if(reply.value("event",std::string())=="authorized") { authorized_=true; if(onAuthorization) onAuthorization(true); if(onStatus) onStatus("Paired - streaming"); }
                 if(onResponse) onResponse(reply);
             } else if(authorized_) {
                 auto before=nowUS();

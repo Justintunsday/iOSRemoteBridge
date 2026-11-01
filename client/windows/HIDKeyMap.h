@@ -23,6 +23,7 @@ inline uint16_t hidUsage(WPARAM key,LPARAM flags) {
     case VK_CONTROL:return extended?0xe4:0xe0; case VK_MENU:return extended?0xe6:0xe2;
     case VK_LSHIFT:return 0xe1; case VK_RSHIFT:return 0xe5; case VK_LCONTROL:return 0xe0; case VK_RCONTROL:return 0xe4;
     case VK_LMENU:return 0xe2; case VK_RMENU:return 0xe6;
+    case VK_LWIN:return 0xe3; case VK_RWIN:return 0xe7;
     default:return 0;
     }
 }

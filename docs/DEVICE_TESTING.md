@@ -42,13 +42,13 @@ reactivation; the service is not available in the stock pre-jailbreak state.
 5. Inspect `/var/jb/var/mobile/Library/iOSRemoteBridge/daemon.log`. A ready TLS
    listener still does not prove the bridge, capture or HID is working.
 
-## Prove consent and capture before input
+## Prove pairing and capture before input
 
 Connect with the Windows client or `python -m automation --config
-credentials/pairing/client-config.json get_device_info`. First reject the local
-prompt and verify that no video is transmitted. Reconnect after the rejection
-cooldown (up to 30 seconds), approve viewing, and check that the approval window
-closes without leaving a floating control button. Verify black/protected content stays protected. Do not
+credentials/pairing/client-config.json get_device_info`. The unlocked paired
+phone must start streaming immediately without an iOSRemoteBridge approval
+window. Verify wrong pairing credentials fail, read-only sessions reject input,
+and a locked phone refuses capture. Verify black/protected content stays protected. Do not
 disable content protections to make a black capture appear.
 
 Check get_device_info reports the correct model and iOS version. Confirm native
@@ -82,7 +82,7 @@ sensitive-action prompt. Launch a harmless installed app by bundle ID and record
 whether the dynamically resolved workspace API succeeds.
 
 Disconnect the client during a drag, a long press and text entry. Verify input
-cancellation, no further video and a fresh local approval after reconnect.
+cancellation, no further video and automatic paired reconnection only after unlocking.
 Repeat for device lock, Wi-Fi loss, daemon restart and respring. Keep the display
 awake manually for the first performance tests: the implementation does not
 disable auto-lock, wake a locked phone, bypass a passcode or run while stock iOS

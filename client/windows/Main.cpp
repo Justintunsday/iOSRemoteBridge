@@ -21,7 +21,7 @@
 using json=nlohmann::json;
 namespace {
 constexpr UINT FrameMessage=WM_APP+1,StatusMessage=WM_APP+2,ResponseMessage=WM_APP+3,KeyboardModeMessage=WM_APP+4;
-constexpr UINT_PTR KeyboardTimer=1;
+constexpr UINT_PTR KeyboardTimer=1,PointerTimer=2;
 constexpr int ExpandedToolbarHeight=280;
 constexpr UINT ToggleToolbarSystem=0x0100;
 HWND window,configEdit,textEdit,bitrateEdit,controlCheck,notice;
@@ -45,7 +45,9 @@ std::wstring status;
 std::string responseNotice;
 std::wstring lastRenderNotice;
 std::set<uint16_t> heldKeys;
-bool keyboardApproved=false,keyboardPending=false;
+bool keyboardApproved=false,keyboardPending=false,pointerDirty=false;
+uint8_t mouseButtons=0;
+int wheelRemainder=0;
 uint64_t connectionEpoch=0;
 ULONGLONG lastGesture=0;
 ULONGLONG drawSince=0;
@@ -142,7 +144,7 @@ VideoFrame rotate(VideoFrame input,int degrees) {
 }
 bool command(json request) {
     if(!connection||!connection->command(std::move(request))) {
-        SetWindowTextW(notice,L"Connect and approve on the iPhone before sending commands."); return false;
+        SetWindowTextW(notice,L"Connect to the unlocked paired iPhone before sending commands."); return false;
     }
     return true;
 }
@@ -152,7 +154,13 @@ bool releaseHeldKeys() {
         if(!connection->command({{"op","key_event"},{"usage",usage},{"down",false}})) ok=false;
     return ok;
 }
+bool sendSystemPointer(int wheel=0) {
+    pointerDirty=false;
+    return command({{"op","mouse_event"},{"x",lastX},{"y",lastY},{"buttons",mouseButtons},{"wheel",wheel}});
+}
 void endDrag() {
+    if(mouseButtons) { mouseButtons=0; if(keyboardApproved) sendSystemPointer(); ReleaseCapture(); }
+    pointerDirty=false;
     if(dragging) { command({{"op","touch"},{"finger",0},{"phase",2},{"x",lastX},{"y",lastY}}); dragging=false; ReleaseCapture(); }
 }
 void fitWindow() {
@@ -215,7 +223,8 @@ void constrainSize(HWND hwnd,UINT edge,RECT &rect) {
 }
 void disconnect() {
     releaseHeldKeys(); endDrag(); ++connectionEpoch;
-    keyboardApproved=keyboardPending=false; KillTimer(window,KeyboardTimer);
+    keyboardApproved=keyboardPending=false; KillTimer(window,KeyboardTimer); KillTimer(window,PointerTimer);
+    pointerDirty=false; wheelRemainder=0;
     SendMessageW(keyboardCheck,BM_SETCHECK,BST_UNCHECKED,0); EnableWindow(keyboardCheck,TRUE);
     if(connection) connection->close(); connection.reset();
     { std::lock_guard<std::mutex> lock(frameMutex); frame.reset(); }
@@ -253,23 +262,23 @@ void connectClient() {
                 PostMessageW(window,ResponseMessage,0,0);
             }
         };
-        SetWindowTextW(notice,L"Approve on the iPhone. Esc disconnects.");
+        SetWindowTextW(notice,L"Connecting to paired iPhone. Esc disconnects.");
         connection->start();
     } catch(const std::exception &) { SetWindowTextW(notice,L"Cannot load pairing file or configuration. Check the local JSON file and required fields."); connection.reset(); }
 }
 void toggleKeyboardMode() {
-    if(keyboardPending) { SetWindowTextW(notice,L"Approve or Reject on the iPhone; Esc disconnects."); return; }
+    if(keyboardPending) { SetWindowTextW(notice,L"Switching system mouse and keyboard mode..."); return; }
     if(!connection||!connection->authorized()) {
         SendMessageW(keyboardCheck,BM_SETCHECK,BST_UNCHECKED,0);
-        SetWindowTextW(notice,L"Connect with Request control and approve on the iPhone first."); return;
+        SetWindowTextW(notice,L"Connect with Request control to the unlocked iPhone first."); return;
     }
     endDrag(); releaseHeldKeys();
     bool enable=!keyboardApproved;
     if(!command({{"op","keyboard_mode"},{"enabled",enable}})) return;
     keyboardApproved=false; keyboardPending=true;
     SendMessageW(keyboardCheck,BM_SETCHECK,enable?BST_CHECKED:BST_UNCHECKED,0); EnableWindow(keyboardCheck,FALSE);
-    SetTimer(window,KeyboardTimer,50000,nullptr);
-    SetWindowTextW(notice,enable?L"Allow live keyboard input on the iPhone.":L"Disabling live keyboard input...");
+    SetTimer(window,KeyboardTimer,10000,nullptr);
+    SetWindowTextW(notice,enable?L"Starting iOS system mouse and hardware keyboard...":L"Stopping system mouse and keyboard...");
 }
 bool videoFocused() { HWND focus=GetFocus(); return focus==window||focus==videoWindow; }
 bool shortcutFocused() {
@@ -300,7 +309,7 @@ bool point(LPARAM position,double &x,double &y) {
 }
 LRESULT CALLBACK videoProcedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
     if(message==WM_ERASEBKGND) return 1;
-    if(message==WM_LBUTTONDOWN||message==WM_LBUTTONUP||message==WM_MOUSEMOVE) {
+    if(message==WM_LBUTTONDOWN||message==WM_LBUTTONUP||message==WM_RBUTTONDOWN||message==WM_RBUTTONUP||message==WM_MBUTTONDOWN||message==WM_MBUTTONUP||message==WM_MOUSEMOVE) {
         POINT p{GET_X_LPARAM(l),GET_Y_LPARAM(l)}; MapWindowPoints(hwnd,window,&p,1);
         return SendMessageW(window,message,w,MAKELPARAM(p.x,p.y));
     }
@@ -392,7 +401,7 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         toggleToolbarButton=control(L"BUTTON",L"Hide tools (F9)",0,0,0,126,26,ToggleToolbar);
         vsyncCheck=control(L"BUTTON",L"VSync",BS_AUTOCHECKBOX,0,0,90,24,VSync);
         fsrCheck=control(L"BUTTON",L"FSR 1",BS_AUTOCHECKBOX,0,0,100,24,FSR);
-        keyboardCheck=control(L"BUTTON",L"Keyboard+mouse (F10)",BS_AUTOCHECKBOX,0,0,200,24,KeyboardMode);
+        keyboardCheck=control(L"BUTTON",L"System mouse+keys (F10)",BS_AUTOCHECKBOX,0,0,200,24,KeyboardMode);
         shortcutHint=control(L"STATIC",L"H Home / C Control",SS_NOPREFIX,0,0,160,20,0);
         experimentalCheck=control(L"BUTTON",L"FSR 4/3/2.3 (exp.)",BS_AUTOCHECKBOX,0,0,210,24,ExperimentalMode);
         experimentalVersions=control(L"COMBOBOX",L"",CBS_DROPDOWNLIST|WS_VSCROLL,0,0,140,110,ExperimentalVersion);
@@ -489,15 +498,34 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
             return 0;
         } break;
     }
-    case WM_KILLFOCUS: if(!releaseHeldKeys()) disconnect(); return 0;
+    case WM_KILLFOCUS: endDrag(); if(!releaseHeldKeys()) disconnect(); return 0;
     case WM_ACTIVATEAPP: if(!w) { endDrag(); if(!releaseHeldKeys()) disconnect(); } break;
     case WM_TIMER:
+        if(w==PointerTimer&&keyboardApproved&&pointerDirty) {
+            if(!sendSystemPointer()) disconnect(); return 0;
+        }
         if(w==KeyboardTimer&&keyboardPending) {
             keyboardPending=keyboardApproved=false; SendMessageW(keyboardCheck,BM_SETCHECK,BST_UNCHECKED,0);
             EnableWindow(keyboardCheck,TRUE); KillTimer(hwnd,KeyboardTimer);
-            SetWindowTextW(notice,L"Keyboard approval timed out; press F10 to try again."); return 0;
+            disconnect(); SetWindowTextW(notice,L"System input did not respond; reconnect before trying again."); return 0;
         } break;
-    case WM_LBUTTONDOWN: {
+    case WM_RBUTTONDOWN: case WM_RBUTTONUP:
+    case WM_MBUTTONDOWN: case WM_MBUTTONUP:
+    case WM_LBUTTONDOWN: case WM_LBUTTONUP: {
+        bool down=message==WM_LBUTTONDOWN||message==WM_RBUTTONDOWN||message==WM_MBUTTONDOWN;
+        if(keyboardApproved) {
+            double x,y; bool inside=point(l,x,y);
+            if(down&&!inside) break;
+            if(inside) { lastX=x; lastY=y; }
+            uint8_t mask=(message==WM_LBUTTONDOWN||message==WM_LBUTTONUP)?1:
+                         (message==WM_RBUTTONDOWN||message==WM_RBUTTONUP)?2:4;
+            if(down) { SetFocus(hwnd); mouseButtons|=mask; SetCapture(hwnd); }
+            else mouseButtons&=static_cast<uint8_t>(~mask);
+            if(!sendSystemPointer()) { disconnect(); return 0; }
+            if(!mouseButtons) ReleaseCapture(); return 0;
+        }
+        if(message==WM_LBUTTONUP) { endDrag(); return 0; }
+        if(message!=WM_LBUTTONDOWN) break;
         double x,y; SetFocus(hwnd);
         if(point(l,x,y)&&connection&&connection->authorized()&&!keyboardPending) {
             lastX=x; lastY=y; dragging=true; SetCapture(hwnd);
@@ -505,16 +533,29 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         } return 0;
     }
     case WM_MOUSEMOVE:
+        if(keyboardApproved) {
+            double x,y;
+            if(point(l,x,y)) { lastX=x; lastY=y; pointerDirty=true; }
+            return 0;
+        }
         if(dragging) { double x,y; if(point(l,x,y)) {
             lastX=x; lastY=y; ULONGLONG now=GetTickCount64();
             if(now-lastMove>=8) { lastMove=now; command({{"op","touch"},{"finger",0},{"phase",1},{"x",x},{"y",y}}); }
         } } return 0;
-    case WM_LBUTTONUP: endDrag(); return 0;
-    case WM_CAPTURECHANGED: if(dragging) endDrag(); return 0;
+    case WM_CAPTURECHANGED: if(dragging||mouseButtons) endDrag(); return 0;
     case WM_MOUSEWHEEL: {
         POINT p{GET_X_LPARAM(l),GET_Y_LPARAM(l)}; ScreenToClient(hwnd,&p);
-        if(PtInRect(&videoRect,p)) { scrollGesture(GET_WHEEL_DELTA_WPARAM(w)<0); return 0; }
-        break;
+        if(PtInRect(&videoRect,p)) {
+            if(keyboardApproved) {
+                double x,y;
+                if(point(MAKELPARAM(p.x,p.y),x,y)) { lastX=x; lastY=y; }
+                wheelRemainder+=GET_WHEEL_DELTA_WPARAM(w);
+                int steps=std::clamp(wheelRemainder/WHEEL_DELTA,-127,127);
+                wheelRemainder-=steps*WHEEL_DELTA;
+                if(steps&&!sendSystemPointer(steps)) disconnect();
+            } else scrollGesture(GET_WHEEL_DELTA_WPARAM(w)<0);
+            return 0;
+        } break;
     }
     case WM_CONTEXTMENU: {
         if(reinterpret_cast<HWND>(w)!=hwnd) break;
@@ -524,13 +565,7 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
             POINT clientPoint=position; ScreenToClient(hwnd,&clientPoint);
             RECT client{}; GetClientRect(hwnd,&client);
             if(!PtInRect(&client,clientPoint)) break; // Keep the native title-bar menu.
-            if(keyboardApproved) {
-                endDrag();
-                double x,y;
-                if(point(MAKELPARAM(clientPoint.x,clientPoint.y),x,y))
-                    command({{"op","long_press"},{"x",x},{"y",y},{"duration_ms",500}});
-                return 0;
-            }
+            if(keyboardApproved) return 0; // Native iOS secondary button owns the video area.
         }
         endDrag();
         HMENU menu=CreatePopupMenu();
@@ -562,8 +597,10 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
     case KeyboardModeMessage:
         if(static_cast<uint64_t>(w)==connectionEpoch) {
             keyboardApproved=l!=0; keyboardPending=false; heldKeys.clear(); KillTimer(hwnd,KeyboardTimer);
+            mouseButtons=0; pointerDirty=false; wheelRemainder=0; KillTimer(hwnd,PointerTimer);
+            if(keyboardApproved) SetTimer(hwnd,PointerTimer,16,nullptr);
             SendMessageW(keyboardCheck,BM_SETCHECK,keyboardApproved?BST_CHECKED:BST_UNCHECKED,0); EnableWindow(keyboardCheck,TRUE);
-            SetWindowTextW(shortcutHint,keyboardApproved?L"Keys sent to iPhone":L"H Home / C Control");
+            SetWindowTextW(shortcutHint,keyboardApproved?L"iOS system HID active":L"H Home / C Control");
             if(keyboardApproved) SetFocus(hwnd);
             lastRenderNotice.clear();
         } return 0;

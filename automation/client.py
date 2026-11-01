@@ -1,4 +1,4 @@
-"""Pinned TLS client. A physical approval is required for every new session."""
+"""Pinned TLS client. Paired sessions start directly while the phone is unlocked."""
 import hashlib
 import hmac
 import json
@@ -67,9 +67,9 @@ class BridgeClient:
             deadline = time.monotonic() + self.timeout
             while True:
                 remaining = deadline - time.monotonic()
-                if remaining <= 0: raise BridgeError("device-owner approval timed out")
+                if remaining <= 0: raise BridgeError("device session startup timed out")
                 try: event = self._events.get(timeout=remaining)
-                except queue.Empty as exc: raise BridgeError("device-owner approval timed out") from exc
+                except queue.Empty as exc: raise BridgeError("device session startup timed out") from exc
                 if isinstance(event, Exception): raise event
                 if event.get("event") == "authorized":
                     self.device = event["device"]
