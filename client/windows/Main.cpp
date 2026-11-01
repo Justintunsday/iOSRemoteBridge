@@ -168,7 +168,7 @@ void stopMouseCapture() {
     if(keyboardApproved) SetWindowTextW(shortcutHint,L"Click video to capture mouse");
 }
 void startMouseCapture() {
-    if(mouseCaptured||!keyboardApproved||!rawMouseReady||videoRect.right<=videoRect.left||videoRect.bottom<=videoRect.top) return;
+    if(mouseCaptured||!keyboardApproved||!rawMouseReady||GetForegroundWindow()!=window||videoRect.right<=videoRect.left||videoRect.bottom<=videoRect.top) return;
     RECT bounds=videoRect; MapWindowPoints(window,nullptr,reinterpret_cast<POINT *>(&bounds),2);
     if(!ClipCursor(&bounds)) { SetWindowTextW(notice,L"Cannot capture mouse; focus the viewer and click the video."); return; }
     mouseMotion.clear(); mouseButtons=0; wheelRemainder=0; mouseCaptured=true;
@@ -638,6 +638,7 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         limits->ptMinTrackSize.y=toolbarHeight()+120+border.cy; return 0;
     }
     case WM_SIZE:
+        if(mouseCaptured) stopMouseCapture();
         if(w!=SIZE_MINIMIZED) { layoutControls(LOWORD(l)); videoRect={}; InvalidateRect(hwnd,nullptr,FALSE); }
         return 0;
     case WM_ERASEBKGND: return 1; // Buffered WM_PAINT owns the entire client background.
