@@ -42,7 +42,10 @@ double lastX=0,lastY=0;
 ULONGLONG lastMove=0;
 enum {Config=10,Browse,Connect,Disconnect,Home,Switcher,VolumeUp,VolumeDown,SendText,Bitrate,Rotate,Fit,KeepRatio,Sharpness,ToggleToolbar};
 int toolbarHeight() { return toolbarVisible?ExpandedToolbarHeight:0; }
-int minimumClientWidth() { return toolbarVisible?380:160; }
+int minimumClientWidth() {
+    int minimum=toolbarVisible?380:160;
+    return keepRatio?std::max(minimum,static_cast<int>(std::ceil(120.0*viewWidth/viewHeight))):minimum;
+}
 std::array<HWND,20> toolbarControls() {
     return {configEdit,browseButton,connectButton,disconnectButton,controlCheck,homeButton,
             switcherButton,volumeUpButton,volumeDownButton,textEdit,sendTextButton,bitrateEdit,
@@ -133,7 +136,9 @@ void fitWindow() {
 }
 void setToolbarVisible(bool visible) {
     if(toolbarVisible==visible) return;
-    endDrag(); toolbarVisible=visible; SetFocus(window);
+    endDrag();
+    if(GetCapture()) ReleaseCapture();
+    toolbarVisible=visible; SetFocus(window);
     for(HWND child:toolbarControls()) ShowWindow(child,visible?SW_SHOWNA:SW_HIDE);
     CheckMenuItem(GetSystemMenu(window,FALSE),ToggleToolbarSystem,MF_BYCOMMAND|(visible?MF_CHECKED:MF_UNCHECKED));
     if(!IsZoomed(window)&&!IsIconic(window)) {
@@ -412,6 +417,11 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int show) {
                     double height=proposed.bottom-proposed.top-border.cy-toolbarHeight();
                     controls=controls&&std::abs(width*viewHeight-height*viewWidth)<=viewHeight;
                 }
+                MINMAXINFO limits{}; SendMessageW(hwnd,WM_GETMINMAXINFO,0,reinterpret_cast<LPARAM>(&limits));
+                RECT smallest{sized.left,sized.top,sized.left+1,sized.top+1};
+                SendMessageW(hwnd,WM_SIZING,WMSZ_BOTTOMRIGHT,reinterpret_cast<LPARAM>(&smallest));
+                controls=controls&&smallest.right-smallest.left>=limits.ptMinTrackSize.x&&
+                         smallest.bottom-smallest.top>=limits.ptMinTrackSize.y;
             }
         }
         SendMessageW(hwnd,WM_KEYDOWN,VK_F9,0);
