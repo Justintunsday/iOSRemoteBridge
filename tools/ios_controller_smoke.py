@@ -13,10 +13,15 @@ APP=next((ROOT/'build/controller-simulator').rglob('iOSRemoteBridge.app'))
 LOGS=ROOT/'build-logs'
 FIXTURE=(ROOT/'client/ios/Tests/gray-full.h264').read_bytes()
 def sim(*args,check=True):
-    return subprocess.run(['xcrun','simctl',*args],check=check,capture_output=True,text=True)
+    print('simctl '+args[0],flush=True)
+    completed=subprocess.run(['xcrun','simctl',*args],check=False,capture_output=True,text=True,timeout=60)
+    if check and completed.returncode:
+        raise RuntimeError(f'simctl {args[0]} failed: {completed.stderr[:3000]}')
+    return completed
 sim('install',SIMULATOR,str(APP))
 def scenario(wrong_pin):
     name='wrong-pin' if wrong_pin else 'stream-and-input'
+    print('Starting '+name,flush=True)
     with tempfile.TemporaryDirectory() as temporary:
         pairing=Path(temporary)/'pairing';provision('127.0.0.1',pairing)
         config=json.loads((pairing/'client-config.json').read_text())
@@ -81,7 +86,7 @@ def scenario(wrong_pin):
             assert observed['auth'] and observed['credits']==[100,101,102],observed
             operations=observed['operations'];assert [x['op'] for x in operations]==['touch','touch','touch','press_home','type_text'],observed
             assert [x['phase'] for x in operations[:3]]==[0,1,2],observed
-        print(name+': '+json.dumps(result,ensure_ascii=False))
+        print(name+': '+json.dumps(result,ensure_ascii=False),flush=True)
 scenario(False)
 scenario(True)
 print('Actual iOS Simulator TLS, certificate-pin, decoded grayscale, coordinate and control checks passed')

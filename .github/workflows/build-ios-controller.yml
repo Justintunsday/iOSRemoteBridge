@@ -61,9 +61,10 @@ jobs:
           xcodebuild -project build/controller-simulator/IRBController.xcodeproj -scheme iOSRemoteBridge -configuration Debug \
             -sdk iphonesimulator -destination "id=$simulator_id" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build 2>&1 | tee build-logs/controller-simulator-build.txt
       - name: Test real iOS TLS, H.264 decode, rendering and touch protocol
+        timeout-minutes: 5
         run: |
           set -euo pipefail
-          python3 tools/ios_controller_smoke.py "$CONTROLLER_SIMULATOR" 2>&1 | tee build-logs/controller-simulator-tests.txt
+          python3 -u tools/ios_controller_smoke.py "$CONTROLLER_SIMULATOR" 2>&1 | tee build-logs/controller-simulator-tests.txt
       - uses: actions/upload-artifact@v4
         if: success()
         with:
