@@ -220,3 +220,24 @@ Windows sharpening modifies the offscreen DIB only after scaling. Microsoft's
 requires synchronization with GDI drawing before direct pixel access, so the
 renderer calls GdiFlush before the CPU filter. The adjustable strength uses a
 standard [trackbar](https://learn.microsoft.com/en-us/windows/win32/controls/trackbar-controls).
+
+## Native iOS mouse and keyboard
+
+Apple documents the iPhone's native pointer through
+[AssistiveTouch](https://support.apple.com/en-gb/111775). The implementation now
+registers a virtual HID device rather than converting mouse movement to touches.
+The dynamically resolved create/report ABI follows Apple's
+[IOHIDUserDevice header](https://github.com/apple-oss-distributions/IOKitUser/blob/main/hid.subproj/IOHIDUserDevice.h).
+Apple's [resource user client](https://github.com/apple-oss-distributions/IOHIDFamily/blob/main/IOHIDFamily/IOHIDResourceUserClient.cpp)
+checks `com.apple.hid.manager.user-access-device` when opening this service.
+The mobile daemon requests that entitlement; it is not attached to the injected
+dylib because a dylib cannot grant new entitlements to SpringBoard.
+
+The report descriptor contains a keyboard, an absolute-position mouse collection
+and a relative mouse collection for native buttons/wheel. Pointer support and
+private AssistiveTouch setting selectors must still be tested on each iOS build.
+`iosremotebridged --hid-check` registers an idle device, prints its API result and
+kernel registry entry ID, then removes it without moving or pressing anything.
+This diagnoses creation, not visible delivery. The application-specific approval
+windows were removed at the owner's request; pairing, control selection, lock
+checks and session cleanup remain enforced.
