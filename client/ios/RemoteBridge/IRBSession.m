@@ -105,7 +105,8 @@
             IRBOutbound *auth=[IRBOutbound new];auth.type=IRB_AUTH;
             auth.object=[@{@"token":owner->_profile.token,@"control":owner->_control?@YES:@NO,@"fps":@(owner->_fps),@"video_window":@3} mutableCopy];
             [owner->_outgoing addObject:auth];[owner flush];[owner receive:generation];
-        } else if(state==nw_connection_state_failed) [owner failed:owner->_tlsFailure?:@"连接失败，请检查地址、局域网权限及其他控制端是否已断开" retry:owner->_tlsFailure==nil];
+        } else if(state==nw_connection_state_failed||(state==nw_connection_state_waiting&&owner->_tlsFailure))
+            [owner failed:owner->_tlsFailure?:@"连接失败，请检查地址、局域网权限及其他控制端是否已断开" retry:owner->_tlsFailure==nil];
     });
     _timer=dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,0,0,_queue);
     dispatch_source_set_timer(_timer,dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC),NSEC_PER_SEC,20*NSEC_PER_MSEC);
