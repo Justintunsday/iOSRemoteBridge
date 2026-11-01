@@ -205,6 +205,23 @@ these do not isolate sharpening cost or prove a stable rate during interaction.
 They are retained alongside the earlier pre-sharpening sample rather than
 being presented as sustained 60-FPS evidence.
 
+## Floating control button removed
+
+At the owner's request, `3ae6cf2ab1872055435c2a54bba90700b8e30dcf` removes the
+red REMOTE CONTROL / SCREEN SHARING floating button. The approval window is
+released after a decision. Connection approval, sensitive-action prompts,
+lock shutdown and the 15-minute session deadline remain in place. The prompt
+now explains that locking the iPhone or disconnecting the client ends a session.
+
+The package from [iOS build 41302176006](https://github.com/Justintunsday/iOSRemoteBridge/actions/runs/41302176006)
+was installed over SSH and SpringBoard reloaded once. The same commit passed
+[main iOS build 41302299854](https://github.com/Justintunsday/iOSRemoteBridge/actions/runs/41302299854)
+and [portable tests 41302299857](https://github.com/Justintunsday/iOSRemoteBridge/actions/runs/41302299857).
+The existing Windows executable reconnected after the owner unlocked and
+approved on the phone; no Windows binary change was needed. The owner confirmed
+**"已消失，画面正常"** (the button is gone and the picture is normal).
+Earlier STOP-button observations above describe previous versions.
+
 ## Remaining validation
 
 Check longer Windows input/reconnect sessions, broader cross-app capture,
