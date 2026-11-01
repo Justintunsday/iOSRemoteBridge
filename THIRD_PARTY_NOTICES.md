@@ -13,6 +13,14 @@ are in client/windows/shaders/vendor, including their original notices.
 AMD and the shader portability header's Michal Drobot notice are retained in
 licenses/AMD-FSR1-MIT.txt and the Windows license bundle.
 
+The optional FSR experiment loads unmodified AMD-signed SDK 2.4 runtime DLLs
+from FidelityFX-SDK commit `7539ae8b6568ad29ed78a753404351daf3b5cca7`.
+tools/fetch_fsr_runtime.py pins their SHA-256 hashes; CI also checks their AMD
+Authenticode signatures. The API headers retain their per-file MIT notices.
+The prebuilt AMD DLLs use AMD's binary redistribution terms, reproduced in
+licenses/AMD-FSR-SDK-2.4.txt. Those terms apply to the AMD binaries; FFmpeg's
+replacement/debugging rights described below remain applicable to FFmpeg.
+
 ZXTouch Rootless (`a602da112ef1a688fb2601424443abb1ccc28c63`) was inspected as a
 technical reference. It is GPL-3.0. No ZXTouch source, objects or binaries are
 linked or distributed here. Any future integration must be a separately

@@ -267,6 +267,11 @@ void toggleKeyboardMode() {
     SetWindowTextW(notice,enable?L"Allow live keyboard input on the iPhone.":L"Disabling live keyboard input...");
 }
 bool videoFocused() { HWND focus=GetFocus(); return focus==window||focus==videoWindow; }
+bool shortcutFocused() {
+    HWND focus=GetFocus();
+    return (focus==window||IsChild(window,focus))&&focus!=configEdit&&focus!=textEdit&&
+           focus!=bitrateEdit&&focus!=sharpnessSlider;
+}
 void scrollGesture(bool up) {
     if(keyboardPending||GetTickCount64()-lastGesture<300) return;
     endDrag(); lastGesture=GetTickCount64();
@@ -447,7 +452,7 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         if(keyboardPending&&videoFocused()) return 0;
         if(w==VK_RETURN&&GetFocus()==bitrateEdit) { command({{"op","configure"},{"bitrate",GetDlgItemInt(hwnd,Bitrate,nullptr,FALSE)*1000}}); return 0; }
         if((GetKeyState(VK_CONTROL)&0x8000)&&w=='T') { SetFocus(textEdit); return 0; }
-        if(videoFocused()) {
+        if(shortcutFocused()) {
             if((GetKeyState(VK_CONTROL)&0x8000)||(GetKeyState(VK_MENU)&0x8000)) break;
             if(w=='H'&&!(l&(1LL<<30))) { command({{"op","press_home"}}); return 0; }
             if(w=='C'&&!(l&(1LL<<30))) { command({{"op","control_center"}}); return 0; }
@@ -539,6 +544,7 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
             keyboardApproved=l!=0; keyboardPending=false; heldKeys.clear(); KillTimer(hwnd,KeyboardTimer);
             SendMessageW(keyboardCheck,BM_SETCHECK,keyboardApproved?BST_CHECKED:BST_UNCHECKED,0); EnableWindow(keyboardCheck,TRUE);
             SetWindowTextW(shortcutHint,keyboardApproved?L"Keys sent to iPhone":L"H Home / C Control");
+            if(keyboardApproved) SetFocus(hwnd);
             lastRenderNotice.clear();
         } return 0;
     case WM_ENTERSIZEMOVE: endDrag(); GetWindowRect(hwnd,&sizingStart); return 0;
@@ -626,11 +632,14 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int show) {
     if(autoConnect) connectClient();
     MSG message;
     while(GetMessageW(&message,nullptr,0,0)>0) {
+        bool navigation=message.message==WM_KEYDOWN&&!keyboardApproved&&shortcutFocused()&&
+                        (message.wParam=='H'||message.wParam=='C'||message.wParam==VK_ADD||message.wParam==VK_OEM_PLUS||
+                         message.wParam==VK_SUBTRACT||message.wParam==VK_OEM_MINUS||message.wParam==VK_UP||message.wParam==VK_DOWN);
         bool shortcut=message.message==WM_KEYDOWN&&(message.wParam==VK_ESCAPE||
                       (message.wParam>=VK_F1&&message.wParam<=VK_F10)||
                       (!keyboardApproved&&(GetKeyState(VK_CONTROL)&0x8000)&&message.wParam=='T')||
                       (message.wParam==VK_RETURN&&GetFocus()==bitrateEdit));
-        if(shortcut) SendMessageW(hwnd,message.message,message.wParam,message.lParam);
+        if(shortcut||navigation) SendMessageW(hwnd,message.message,message.wParam,message.lParam);
         else { TranslateMessage(&message); DispatchMessageW(&message); }
     }
     connection.reset(); WSACleanup(); return 0;

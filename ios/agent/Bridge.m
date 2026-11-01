@@ -208,7 +208,7 @@
     return @{@"model":[NSString stringWithUTF8String:u.machine],@"ios":UIDevice.currentDevice.systemVersion,
         @"width":@(_capture.width),@"height":@(_capture.height),@"fps_requested":@(_fps),
         @"video_window":@(_videoWindow.limit),
-        @"control":@(_control),@"orientation":@"natural_portrait",@"input_status":_input.status,
+        @"control":@(_control),@"keyboard_enabled":IRBBool(_keyboardEnabled),@"orientation":@"natural_portrait",@"input_status":_input.status,
         @"input_diagnostics":_input.diagnostics,
         @"hardware_encoder":_encoder.hardwareStatus?:@"unknown",@"low_latency_mode":@(_encoder.lowLatency),
         @"runtime_verified":@NO};

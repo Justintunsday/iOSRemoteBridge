@@ -39,7 +39,12 @@ physical approval on the unlocked iPhone. It is not an unattended-access server.
   Respring and daemon/bridge loss invalidate the session. The client discards
   queued input before reconnecting; it never retries an ambiguous gesture.
 - During a sensitive-action prompt, incoming input is rejected and capture is
-  paused. Text entry, single HID key presses and launch_app always ask locally.
+  paused. Text entry, the single-key API and launch_app ask locally. Live
+  keyboard mode requires a separate local grant for key down/up events for that
+  approved session. Turning it off releases keys and revokes it, including if
+  an older grant prompt is still pending. Lock, disconnect and expiry revoke it.
+  The Windows client releases held keys on focus loss and clears mode state on
+  reconnect; it uses focused-window events rather than a global keyboard hook.
   Generic taps/swipes cannot be semantically classified: an approved control
   session can interact with a payment, deletion or permission screen. The owner
   must supervise and stop a session before such actions. This prototype does

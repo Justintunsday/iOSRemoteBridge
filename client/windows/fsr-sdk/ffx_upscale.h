@@ -21,8 +21,9 @@
 // THE SOFTWARE.
 
 #pragma once
-#include "../../api/include/ffx_api.h"
-#include "../../api/include/ffx_api_types.h"
+// iOSRemoteBridge: include paths adjusted for the flattened vendored layout.
+#include "ffx_api.h"
+#include "ffx_api_types.h"
 
 #ifdef __cplusplus
 extern "C" {

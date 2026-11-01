@@ -51,19 +51,54 @@ does not reconnect or reset control values. Keep ratio/Fit account for the
 current toolbar height, and mouse coordinates follow the displayed image.
 
 The Sharp slider adjusts local edge sharpening from 0–100%, starting at 40%.
-Zero disables it. The filter runs after resizing, uses a small luma unsharp mask
-and limits halos. Flat colors and channel differences are preserved; the control
+Zero disables it. GPU presentation uses AMD RCAS after scaling; the GDI fallback
+uses a luma unsharp mask with bounded halos. Flat colors are preserved; the control
 does not change exposure, gamma, encoder quality or phone settings. The selected
 strength lasts for the current viewer process. Decoding hands off immutable
 frames so sharpening does not hold the decoder's frame mutex.
 
+VSync is on by default. D3D11 flip-model presentation uses sync interval 1;
+turning it off uses interval 0 with tearing allowed when supported. Refresh rate
+and incoming frames still limit visible FPS. VSync can add presentation latency.
+
+FSR 1 enables AMD's EASU spatial upscaler when the displayed image is larger
+than the decoded frame. It is off by default. For example, F4 requests
+half-resolution video, which FSR 1 can upscale to the viewer size. Native-size
+or smaller images use regular sampling. It does not generate extra frames.
+
+FSR 4/3/2.3 (exp.) is a separate, **off-by-default experiment**. AMD SDK 2.4
+enumerates providers and attempts 4, then 3, then 2.3. The display notice reports
+the actual context's version. This video stream has no engine depth, motion or
+camera jitter: the experiment supplies a flat plane, zero motion, fixed exposure
+and resets history on every frame. It has no temporal accumulation and is not a
+complete game-style FSR integration. It uses DX12 conversion/upload/readback
+before D3D11 presentation and can reduce FPS or add latency. The stable renderer
+continues if no provider works. Enlarge the image or request F4 to exercise it.
+
+With Keyboard+mouse off, H opens Home, C opens Control Center, + / - change
+volume, and Up / Down perform upward/downward swipes. Local pairing, text and
+bitrate fields, and the sharpness slider, keep their normal keyboard behavior.
+Mouse wheel scrolling is available over the video.
+
+Keyboard+mouse / F10 requests separate approval on the iPhone for live HID key
+down/up events for this connection. After Allow, focus the video to type; H/C
+then type characters instead of navigation shortcuts. Mouse clicks/drags remain
+touches, the wheel scrolls, and right-click performs a long press. F1–F10 and Esc
+remain local controls. F9 or the title-bar menu restores hidden tools. Switching
+focus releases held keys. Turning the mode off, locking, or disconnecting revokes
+the grant; reconnecting requires approval again. This is US-layout HID input,
+without host IME composition/Unicode text transfer or a native iOS mouse pointer.
+
 Statistics show decoded FPS, **network round-trip time**, last decode time and
 the selected decoder. RTT is not end-to-end display latency. D3D11VA is attempted
-when supported, with software fallback. The initial renderer copies decoded
-pixels to system memory for GDI presentation. Each paint is composed in a reused
-offscreen bitmap and copied to the window in one pass; background erasure does
-not clear the displayed image between frames. This is not a zero-copy GPU renderer.
-The title reports software if GPU decoding was unavailable or reset.
+when supported, with software fallback. Decoded pixels still pass through system
+memory, then upload to D3D11; this is not a zero-copy decoder/presenter. A video
+child window separates presentation from the toolbar. Advanced-renderer failure
+falls back to buffered GDI and disables VSync/FSR controls. The title reports
+software if GPU decoding was unavailable or reset. `irb-gpu-check.exe` checks
+native range, EASU/RCAS output and presentation; `--warp` tests software D3D.
+`irb-fsr-check.exe --probe` lists SDK versions; without the flag it checks a
+synthetic single-frame upscale and reports conversion/GPU/readback time.
 
 GPU download retains the decoded frame's color properties. Full-range and
 limited-range video use the corresponding conversion into full-range BGRA,
