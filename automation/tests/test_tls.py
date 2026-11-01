@@ -50,8 +50,8 @@ class TLSTests(unittest.TestCase):
                     send(p.RESPONSE, 2, {"event": "authorized", "device": {"model": "SIMULATOR"}})
                     send(p.VIDEO, 3, b"\0\0\0\1fake-frame", 12345)
                     seq = 3
-                    if observed["video_window"] == 2:
-                        seq += 1; send(p.VIDEO, seq, b"\0\0\0\1next-frame", 12346)
+                    for offset in range(1, observed["video_window"]):
+                        seq += 1; send(p.VIDEO, seq, b"\0\0\0\1next-frame", 12345+offset)
                     while True:
                         h = p.unpack(p.recv_exact(sock, 24)); data = p.recv_exact(sock, h.length)
                         if h.kind == p.CREDIT:
@@ -82,8 +82,8 @@ class TLSTests(unittest.TestCase):
             self.assertEqual(client.request("get_device_info"), {"echo": "get_device_info"})
             self.assertTrue(observed["auth"])
             self.assertTrue(observed["credit"].wait(2))
-            self.assertEqual(observed["video_window"], 2)
-            self.assertEqual(observed["credits"], [12345, 12346])
+            self.assertEqual(observed["video_window"], 3)
+            self.assertEqual(observed["credits"], [12345, 12346, 12347])
             with self.assertRaisesRegex(BridgeError, "owner declined"): client.request("reject")
 
     def test_legacy_single_frame_window(self):
@@ -95,7 +95,7 @@ class TLSTests(unittest.TestCase):
 
     def test_invalid_frame_window_rejected_before_network(self):
         config = json.loads((self.folder / "client-config.json").read_text())
-        for value in (0, 3, True, 1.5, "2"):
+        for value in (0, 4, True, 1.5, "2"):
             with self.assertRaisesRegex(ValueError, "video_window"):
                 BridgeClient(config, video_window=value)
 

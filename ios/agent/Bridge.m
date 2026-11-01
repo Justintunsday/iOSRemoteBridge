@@ -204,7 +204,7 @@
     for(NSNumber *pts in _encodingPTS) if(IRBNow()-pts.unsignedLongLongValue>2000000) {
         [self stopSession:@"encoder callback timed out"]; return;
     }
-    if(!irb_window_available(&_videoWindow)||_encodingPTS.count>=_videoWindow.limit||_confirming||_pendingConfiguration) { ++_skipped; return; }
+    if(!irb_window_available(&_videoWindow)||_encodingPTS.count>=MIN(_videoWindow.limit,2u)||_confirming||_pendingConfiguration) { ++_skipped; return; }
     uint64_t start=IRBNow(); CVPixelBufferRef frame=[_capture copyFrame]; _captureMs=(IRBNow()-start)/1000.0;
     if(!frame) { if(++_failures>=3) [self stopSession:_capture.error?:@"capture failed"]; return; }
     _slow=_captureMs>25?_slow+1:0;
@@ -242,7 +242,8 @@
         if(_approved||_confirming) return;
         NSDictionary *options=IRBDictionary(data);
         _fps=[IRBNumber(options[@"fps"]) intValue]==60?60:30;
-        _windowLimit=[IRBNumber(options[@"video_window"]) intValue]==2?2:1;
+        unsigned requested=[IRBNumber(options[@"video_window"]) unsignedIntValue];
+        _windowLimit=requested>=1&&requested<=IRB_MAX_VIDEO_WINDOW?requested:1;
         _bitrate=8000000; _scale=1; _control=[IRBNumber(options[@"control"]) boolValue];
         uint64_t generation=++_generation;
         NSString *message=_control?@"An authenticated remote requests screen viewing and system-wide input for 15 minutes. Supervise sensitive screens. Text, keyboard and app launches ask again locally. Tap the red STOP control to disconnect.":@"An authenticated remote requests screen viewing for 15 minutes. Tap the red STOP control to disconnect.";

@@ -2,7 +2,7 @@
 #define IRB_FRAME_WINDOW_H
 #include <stdint.h>
 
-#define IRB_MAX_VIDEO_WINDOW 2u
+#define IRB_MAX_VIDEO_WINDOW 3u
 typedef struct {
     unsigned limit,count;
     uint64_t pts[IRB_MAX_VIDEO_WINDOW],started[IRB_MAX_VIDEO_WINDOW],last_pts;
@@ -11,7 +11,7 @@ typedef struct {
 static inline void irb_window_init(irb_frame_window *window,unsigned limit) {
     window->count=0; window->last_pts=0;
     for(unsigned i=0;i<IRB_MAX_VIDEO_WINDOW;++i) { window->pts[i]=0; window->started[i]=0; }
-    window->limit=limit==IRB_MAX_VIDEO_WINDOW?IRB_MAX_VIDEO_WINDOW:1;
+    window->limit=limit>=1&&limit<=IRB_MAX_VIDEO_WINDOW?limit:1;
 }
 static inline int irb_window_available(const irb_frame_window *window) {
     return window->count<window->limit;

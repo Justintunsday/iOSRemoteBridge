@@ -16,7 +16,7 @@ class BridgeError(RuntimeError):
     pass
 
 class BridgeClient:
-    def __init__(self, config, *, control=False, fps=30, timeout=60, video_window=2):
+    def __init__(self, config, *, control=False, fps=30, timeout=60, video_window=3):
         if isinstance(config, (str, Path)):
             config = json.loads(Path(config).read_text(encoding="utf-8"))
         self.config = dict(config)
@@ -29,7 +29,7 @@ class BridgeClient:
         if type(port) is not int or not 1024 <= port <= 65535:
             raise ValueError("port must be 1024..65535")
         if fps not in (30, 60): raise ValueError("fps must be 30 or 60")
-        if type(video_window) is not int or video_window not in (1, 2): raise ValueError("video_window must be 1 or 2")
+        if type(video_window) is not int or video_window not in (1, 2, 3): raise ValueError("video_window must be 1, 2 or 3")
         self.video_window = video_window
         self.control, self.fps, self.timeout = control, fps, timeout
         self.sock = None

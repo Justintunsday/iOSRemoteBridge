@@ -38,7 +38,7 @@ def run(executable, fixture, wrong_pin):
                     h = p.unpack(p.recv_exact(sock, 24))
                     auth = json.loads(p.recv_exact(sock, h.length)); auth_seen.set()
                     if h.kind != p.AUTH or auth["token"] != config["token"]: raise ValueError("incorrect authentication")
-                    if auth.get("video_window") != 2 or auth.get("fps") != 60: raise ValueError("interactive pipeline negotiation missing")
+                    if auth.get("video_window") != 3 or auth.get("fps") != 60: raise ValueError("interactive pipeline negotiation missing")
                     sequence = 0
                     pending_video = deque()
                     final_ready = False
@@ -54,6 +54,8 @@ def run(executable, fixture, wrong_pin):
                     send(p.VIDEO, Path(fixture).read_bytes(), 123456)
                     pending_video.append(123457)
                     send(p.VIDEO, Path(fixture).read_bytes(), 123457)
+                    pending_video.append(123458)
+                    send(p.VIDEO, Path(fixture).read_bytes(), 123458)
                     received_sequence = h.sequence
                     while True:
                         h = p.unpack(p.recv_exact(sock, 24)); payload = p.recv_exact(sock, h.length)
@@ -62,7 +64,7 @@ def run(executable, fixture, wrong_pin):
                         if h.kind == p.CREDIT:
                             if h.length or not pending_video or pending_video.popleft() != h.pts_us:
                                 raise ValueError("client frame credit out of order")
-                            if h.pts_us == 123458: ack_seen.set()
+                            if h.pts_us == 123459: ack_seen.set()
                         elif h.kind == p.PING: send(p.PONG, payload, h.pts_us)
                         elif h.kind == p.CONTROL:
                             request = json.loads(payload)
@@ -76,9 +78,9 @@ def run(executable, fixture, wrong_pin):
                                                   "result": {"model": "TLS_SIMULATOR"}})
                             if len(actions_seen) == 7:
                                 final_ready = True
-                        if final_ready and len(pending_video) < 2:
-                            pending_video.append(123458)
-                            send(p.VIDEO, Path(fixture).read_bytes(), 123458)
+                        if final_ready and len(pending_video) < 3:
+                            pending_video.append(123459)
+                            send(p.VIDEO, Path(fixture).read_bytes(), 123459)
                             final_ready = False
             except (EOFError, ConnectionError): pass
             except Exception as exc: errors.append(str(exc))

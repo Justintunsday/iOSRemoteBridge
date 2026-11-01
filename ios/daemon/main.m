@@ -194,7 +194,8 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
             [self send:IRB_RESPONSE flags:0 pts:0 data:IRBJSON(@{@"event":@"approval_required"})];
             BOOL control=[auth[@"control"] isKindOfClass:NSNumber.class]&&[auth[@"control"] boolValue];
             int fps=([auth[@"fps"] isKindOfClass:NSNumber.class]&&[auth[@"fps"] intValue]==60)?60:30;
-            unsigned window=[IRBNumber(auth[@"video_window"]) intValue]==2?2:1;
+            unsigned requested=[IRBNumber(auth[@"video_window"]) unsignedIntValue];
+            unsigned window=requested>=1&&requested<=IRB_MAX_VIDEO_WINDOW?requested:1;
             irb_window_init(&_videoWindow,window);
             [_bridge send:IRB_START flags:0 pts:0 data:IRBJSON(@{@"control":@(control),@"fps":@(fps),@"video_window":@(window)})];
         } else if(h.type==IRB_PING) [self send:IRB_PONG flags:0 pts:h.pts_us data:data];

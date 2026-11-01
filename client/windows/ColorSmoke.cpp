@@ -28,7 +28,10 @@ int main() {
             for(int i=0;i<12;++i) {
                 int expected=range==AVCOL_RANGE_JPEG?levels[i]:std::clamp(static_cast<int>(std::lround((levels[i]-16)*255.0/219)),0,255);
                 size_t p=(16*192+i*16+8)*4;
-                for(int c=0;c<3;++c) require(std::abs(static_cast<int>(pixels.bgra[p+c])-expected)<=2);
+                for(int c=0;c<3;++c) if(std::abs(static_cast<int>(pixels.bgra[p+c])-expected)>2) {
+                    std::cerr<<"range="<<range<<" Y="<<levels[i]<<" channel="<<c<<" expected="<<expected<<" actual="<<static_cast<int>(pixels.bgra[p+c])<<'\n';
+                    require(false);
+                }
             }
         }
         // Identical YUV bytes require different matrices; the context must
@@ -42,7 +45,10 @@ int main() {
                 source->data[1][row*source->linesize[1]+x+1]=255;
             }
             converter.convert(*source,pixels); size_t p=(16*192+96)*4;
-            require(pixels.bgra[p]<4&&pixels.bgra[p+1]<4&&pixels.bgra[p+2]>251);
+            if(!(pixels.bgra[p]<4&&pixels.bgra[p+1]<4&&pixels.bgra[p+2]>251)) {
+                std::cerr<<"matrix="<<matrix<<" BGR="<<static_cast<int>(pixels.bgra[p])<<','<<static_cast<int>(pixels.bgra[p+1])<<','<<static_cast<int>(pixels.bgra[p+2])<<'\n';
+                require(false);
+            }
         }
         av_frame_free(&source); av_frame_free(&download);
         std::cout<<"Full/limited NV12 ramps preserve black, near-white detail and BT.601/709 colors across metadata changes\n";
