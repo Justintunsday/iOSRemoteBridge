@@ -5,22 +5,39 @@
 #include <limits>
 static void check(bool ok) { if(!ok) { std::cerr<<"native HID report check failed\n"; std::exit(1); } }
 int main() {
-    // Parse the descriptor independently: input bit lengths must agree with
-    // the report bytes sent to the kernel, and each collection must close.
-    std::array<unsigned,4> bits{}; unsigned size=0,count=0,id=0,collections=0;
-    for(size_t n=0;n<sizeof(irb_hid_descriptor);) {
-        unsigned tag=irb_hid_descriptor[n++],bytes=tag&3; if(bytes==3) bytes=4;
-        check(n+bytes<=sizeof(irb_hid_descriptor)); unsigned value=0;
-        for(unsigned j=0;j<bytes;++j) value|=static_cast<unsigned>(irb_hid_descriptor[n++])<<(8*j);
-        switch(tag&0xfc) {
-        case 0x74:size=value;break; case 0x94:count=value;break;
-        case 0x84:id=value;check(id>0&&id<bits.size());break;
-        case 0x80:bits[id]+=size*count;break;
-        case 0xa0:++collections;break; case 0xc0:check(collections>0);--collections;break;
-        default:break;
+    // Parse each kernel device independently. Mixing an absolute axis and a
+    // relative axis in one descriptor must fail this regression check.
+    std::array<unsigned,4> bits{};
+    for(unsigned device=0;device<IRB_HID_DEVICE_COUNT;++device) {
+        size_t length=0; const uint8_t *descriptor=irb_hid_device_descriptor(device,&length);
+        check(descriptor&&length); unsigned size=0,count=0,id=0,collections=0,applications=0,page=0,axes=0;
+        unsigned absoluteAxes=0,relativeAxes=0;
+        for(size_t n=0;n<length;) {
+            unsigned tag=descriptor[n++],bytes=tag&3; if(bytes==3) bytes=4;
+            check(n+bytes<=length); unsigned value=0;
+            for(unsigned j=0;j<bytes;++j) value|=static_cast<unsigned>(descriptor[n++])<<(8*j);
+            switch(tag&0xfc) {
+            case 0x04:page=value;break;
+            case 0x08:if(page==1&&(value==0x30||value==0x31)) ++axes;break;
+            case 0x74:size=value;break; case 0x94:count=value;break;
+            case 0x84:id=value;check(id==device+1&&id<bits.size());break;
+            case 0x80:
+                bits[id]+=size*count;
+                if(axes) { if(value&4) relativeAxes+=axes; else absoluteAxes+=axes; }
+                axes=0;break;
+            case 0xa0:if(!collections) { check(value==1);++applications; } ++collections;axes=0;break;
+            case 0xc0:check(collections>0);--collections;axes=0;break;
+            default:break;
+            }
         }
+        check(!collections&&applications==1);
+        check(irb_hid_report_device(static_cast<uint8_t>(id))==static_cast<int>(device));
+        if(device==IRB_HID_POSITION) check(absoluteAxes==2&&relativeAxes==0);
+        if(device==IRB_HID_MOUSE) check(absoluteAxes==0&&relativeAxes==2);
     }
-    check(!collections&&bits[1]==64&&bits[2]==32&&bits[3]==48);
+    check(bits[1]==64&&bits[2]==32&&bits[3]==48);
+    size_t invalidLength=1;check(!irb_hid_device_descriptor(3,&invalidLength)&&!invalidLength);
+    check(irb_hid_report_device(0)==-1&&irb_hid_report_device(4)==-1);
     uint8_t keys[256]{},key[9]{},position[5]{},mouse[7]{};
     keys[225]=1; keys[4]=1; keys[229]=1; keys[40]=1;
     check(irb_hid_keyboard(keys,key));
