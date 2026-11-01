@@ -9,6 +9,8 @@
 #import <fcntl.h>
 #import <unistd.h>
 #import <signal.h>
+#include <stdio.h>
+#include <string.h>
 #import "../common/IRBLocalPeer.h"
 #import "../common/IRBValidation.h"
 #import "../input/IRBNativeHID.h"
