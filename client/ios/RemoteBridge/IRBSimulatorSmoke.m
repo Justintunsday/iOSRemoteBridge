@@ -51,7 +51,7 @@ void IRBStartSimulatorSmoke(IRBControllerViewController *controller) {
     };
     if(!profile) {finish(NO,@"test profile missing");return;}
     IRBProfile *stored=IRBProfileStore.load;
-    result[@"keychain_valid"]=@([stored.JSONData isEqualToData:profile.JSONData]);
+    result[@"keychain_valid"]=@([stored.host isEqual:profile.host]&&stored.port==profile.port&&[stored.token isEqual:profile.token]&&[stored.certificatePin isEqual:profile.certificatePin]);
     if(![result[@"keychain_valid"] boolValue]) {finish(NO,@"pairing Keychain round trip failed");return;}
     [controller.session connect:profile fps:60 control:YES];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,35*NSEC_PER_SEC),dispatch_get_main_queue(),^{finish(NO,@"simulator integration timed out");});

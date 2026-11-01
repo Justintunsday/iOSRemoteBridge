@@ -2,7 +2,7 @@
 
 ```mermaid
 flowchart LR
-  W[Win32 client / Python automation] <-->|Pinned TLS 1.2+| D[mobile LaunchDaemon]
+  W[Win32 / iOS UIKit client / Python automation] <-->|Pinned TLS 1.2+| D[mobile LaunchDaemon]
   D <-->|0600 Unix socket, peer UID checked| S[SpringBoard bridge]
   S --> C[CARenderServer into IOSurface-backed pool]
   C --> V[VideoToolbox H.264]
@@ -95,6 +95,19 @@ contacts and keys. Gestures and text use timers; no blocking sleeps run on the
 SpringBoard thread. The mouse controls one contact; API contacts 0..9 permit
 multi-touch. Coordinates are normalized in the natural portrait plane. The
 viewer applies inverse rotation and rejects letterbox clicks.
+
+The Objective-C iOS controller uses public UIKit, Network, Security,
+VideoToolbox and AVSampleBufferDisplayLayer APIs. It imports the client pairing
+JSON through a scoped document URL and retains the token and exact certificate
+pin in a device-only Keychain item. TLS verifies the pin before AUTH. A serial
+decoder consumes every encoded access unit, and credits return in timestamp
+order after decoded images reach the main-thread renderer. Only decoded
+images may be skipped under display backpressure. Touch input tracks up to
+two contacts, applies inverse display rotation, and coalesces unsent moves
+without crossing contact begin/end boundaries. Backgrounding releases input
+and disconnects; network reconnection uses a fresh generation and discards
+old input. CI exercises this production path with temporary loopback credentials
+and synthetic video; physical controller-device validation is separate.
 
 Home, App Switcher and Control Center use dynamically guarded SpringBoard handlers. Volume
 and keyboard remain HID operations. Separate HID clients observe the physical

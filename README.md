@@ -33,6 +33,10 @@ records the relative mouse correction and its physical test results.
   collapsible toolbar, VSync, FSR 1, an optional single-frame FSR 4/3/2.3 experiment,
   navigation shortcuts, captured native iOS relative mouse/keyboard input, reconnect and
   FPS/RTT/decode statistics.
+- Objective-C / UIKit controller for iPhone and iPad (iOS 15+), with native
+  VideoToolbox decoding, pinned TLS, Keychain pairing, two-finger touch, system
+  navigation, quality settings and a collapsible toolbar. See [IOS_CLIENT](docs/IOS_CLIENT.md)
+  for AltStore / Sideloadly re-signing and installation.
 - Python API/CLI, JSON-lines adapter and optional standard MCP stdio tools.
 - GitHub Actions builds, TLS/H.264 simulator tests, validation, logs/artifacts
   and a manually gated draft-release workflow.
@@ -57,6 +61,11 @@ future work. ScreenCaptureKit is unavailable on iOS 16.1.1.
    default; input needs `--control`; paired clients execute operations directly. Lock the iPhone or
    disconnect the client to end the session.
 
+To control from another iPhone or iPad, use the [iOS controller build](https://github.com/Justintunsday/iOSRemoteBridge/actions/workflows/build-ios-controller.yml)
+and follow [IOS_CLIENT.md](docs/IOS_CLIENT.md). Re-sign the IPA with your own
+account, import the same client pairing file, and disconnect the Windows client
+before connecting from iOS. The controller itself does not require a jailbreak.
+
 Pairing files stay local. No Mac must remain connected after installation.
 A normal reboot requires jailbreak reactivation. Sleep/lock ends the session;
 the implementation does not bypass a passcode or disable auto-lock.
@@ -71,6 +80,7 @@ the implementation does not bypass a passcode or disable auto-lock.
 | [SECURITY](docs/SECURITY.md) | Authentication, automatic operation policy and threat-model limits |
 | [PERFORMANCE](docs/PERFORMANCE.md) | Evidence, calculated budgets and measurement procedures |
 | [CLIENT](docs/CLIENT.md) | Windows controls and source builds |
+| [IOS_CLIENT](docs/IOS_CLIENT.md) | Objective-C iPhone/iPad controller, re-signing and pairing |
 | [AUTOMATION](docs/AUTOMATION.md) | API operations, Python and MCP |
 | [IMPLEMENTATION_PLAN](docs/IMPLEMENTATION_PLAN.md) | Milestone ledger and remaining work |
 

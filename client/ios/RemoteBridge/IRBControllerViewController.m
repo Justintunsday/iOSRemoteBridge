@@ -80,7 +80,7 @@
 }
 - (void)importProfile {
     [_videoView cancelTouches];[_session disconnect];[self.view endEditing:YES];
-    UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeJSON] asCopy:YES];picker.delegate=self;picker.allowsMultipleSelection=NO;[self presentViewController:picker animated:YES completion:nil];
+    UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeJSON] asCopy:NO];picker.delegate=self;picker.allowsMultipleSelection=NO;[self presentViewController:picker animated:YES completion:nil];
 }
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     (void)controller;NSURL *url=urls.firstObject;if(!url) return;BOOL scoped=[url startAccessingSecurityScopedResource];NSError *error=nil;
