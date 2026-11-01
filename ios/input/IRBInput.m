@@ -3,6 +3,8 @@
 #import "IRBInput.h"
 #import <dlfcn.h>
 #import <mach/mach_time.h>
+#import <UIKit/UIKit.h>
+#import <objc/message.h>
 typedef CFTypeRef Event;
 typedef CFTypeRef Client;
 typedef double HIDFloat;
@@ -15,6 +17,7 @@ typedef Event (*Finger)(CFAllocatorRef,uint64_t,uint32_t,uint32_t,uint32_t,HIDFl
                        HIDFloat,HIDFloat,Boolean,Boolean,uint32_t);
 typedef Event (*Keyboard)(CFAllocatorRef,uint64_t,uint32_t,uint32_t,Boolean,uint32_t);
 typedef void (*SetInt)(Event,uint32_t,CFIndex);
+typedef void (*SetFloat)(Event,uint32_t,HIDFloat);
 typedef void (*SetSender)(Event,uint64_t);
 typedef uint64_t (*GetSender)(Event);
 typedef uint32_t (*GetType)(Event);
@@ -25,10 +28,12 @@ typedef void (*Register)(Client,EventCallback,void *,void *);
 - (void)observe:(Event)event;
 @end
 @implementation IRBInput {
-    Client _client;
+    Client _client,_monitor;
     Dispatch _dispatch; Digitizer _digitizer; Finger _finger; Keyboard _keyboard;
     SetInt _setInt; SetSender _setSender; GetSender _getSender; GetType _getType; Append _append;
+    SetFloat _setFloat;
     uint64_t _sender;
+    uint64_t _touchReports,_keyReports;
     BOOL _down[10],_keys[256]; CGPoint _positions[10];
 }
 static void observed(void *target,void *ref,void *service,Event event) {
@@ -47,15 +52,16 @@ static void observed(void *target,void *ref,void *service,Event event) {
         _keyboard=RESOLVE(Keyboard,"IOHIDEventCreateKeyboardEvent");
         _append=RESOLVE(Append,"IOHIDEventAppendEvent");
         _setInt=RESOLVE(SetInt,"IOHIDEventSetIntegerValue");
+        _setFloat=RESOLVE(SetFloat,"IOHIDEventSetFloatValue");
         _setSender=RESOLVE(SetSender,"IOHIDEventSetSenderID");
         _getSender=RESOLVE(GetSender,"IOHIDEventGetSenderID");
         _getType=RESOLVE(GetType,"IOHIDEventGetType");
         Schedule schedule=RESOLVE(Schedule,"IOHIDEventSystemClientScheduleWithRunLoop");
         Register reg=RESOLVE(Register,"IOHIDEventSystemClientRegisterEventCallback");
-        if(create) _client=create(kCFAllocatorDefault);
-        if(_client&&schedule&&reg&&_getSender&&_getType) {
-            schedule(_client,CFRunLoopGetMain(),kCFRunLoopCommonModes);
-            reg(_client,observed,(__bridge void *)self,NULL);
+        if(create) { _client=create(kCFAllocatorDefault); _monitor=create(kCFAllocatorDefault); }
+        if(_monitor&&schedule&&reg&&_getSender&&_getType) {
+            reg(_monitor,observed,(__bridge void *)self,NULL);
+            schedule(_monitor,CFRunLoopGetMain(),kCFRunLoopCommonModes);
         }
 #undef RESOLVE
     } return self;
@@ -65,44 +71,72 @@ static void observed(void *target,void *ref,void *service,Event event) {
 }
 - (BOOL)ready { return _client&&_dispatch&&_digitizer&&_finger&&_append&&_setInt&&_setSender&&_sender; }
 - (NSString *)status { return self.ready?@"symbols resolved; delivery unverified":@"waiting for HID APIs and a physical touchscreen event"; }
+- (NSDictionary *)diagnostics {
+    return @{@"dispatch_client":@(_client!=NULL),@"monitor_client":@(_monitor!=NULL),
+        @"touch_ready":@(self.ready),@"sender_observed":@(_sender!=0),
+        @"touch_reports_submitted":@(_touchReports),@"key_reports_submitted":@(_keyReports),
+        @"home_selector":@([UIApplication.sharedApplication respondsToSelector:NSSelectorFromString(@"_simulateHomeButtonPress")]||
+                          [UIApplication.sharedApplication respondsToSelector:NSSelectorFromString(@"_simulateHomeButtonPressWithCompletion:")]),
+        @"switcher_selector":@([UIApplication.sharedApplication respondsToSelector:NSSelectorFromString(@"_handleOpenAppSwitcherShortcut:")])};
+}
 - (BOOL)touch:(int)index phase:(int)phase x:(double)x y:(double)y {
     if(!self.ready||index<0||index>=10||phase<0||phase>2||!isfinite(x)||!isfinite(y)||x<0||x>1||y<0||y>1) return NO;
     if((phase==0&&_down[index])||(phase!=0&&!_down[index])) return NO;
     BOOL next=phase!=2, was=_down[index];
     _positions[index]=CGPointMake(x,y); _down[index]=next;
     BOOL any=NO; for(int i=0;i<10;++i) any|=_down[i];
-    uint32_t mask=phase==1?4:3; uint64_t now=mach_absolute_time();
-    Event parent=_digitizer(NULL,now,3,0,0,mask,0,x,y,0,0,0,any,any,0);
+    uint32_t mask=phase==1?4:3,handMask=phase==1?4:(3|0x20); uint64_t now=mach_absolute_time();
+    Event parent=_digitizer(NULL,now,3,0,0,handMask,0,0,0,0,0,0,any,any,0);
     if(!parent) { _down[index]=was; return NO; }
     _setInt(parent,0xb0019,1); _setSender(parent,_sender);
     BOOL ok=YES;
     for(int i=0;i<10;++i) if(_down[i]||i==index) {
         CGPoint p=_positions[i]; BOOL active=_down[i];
-        Event child=_finger(NULL,now,(uint32_t)i+1,(uint32_t)i+2,i==index?mask:4,
+        Event child=_finger(NULL,now,(uint32_t)i+1,(uint32_t)i+2,i==index?mask:0,
                             p.x,p.y,0,active?0.5:0,0,active,active,0);
         if(!child) { ok=NO; break; }
-        _setInt(child,0xb0019,1); _setSender(child,_sender); _append(parent,child,0); CFRelease(child);
+        if(_setFloat) { _setFloat(child,0xb0014,.04); _setFloat(child,0xb0015,.04); }
+        _append(parent,child,0); CFRelease(child);
     }
-    if(ok) _dispatch(_client,parent); else _down[index]=was;
+    // Appending children can update the collection fields. Restore the final
+    // aggregate state, including the identity transition for a down/up.
+    _setInt(parent,0xb0007,handMask);
+    _setInt(parent,0xb0008,any); _setInt(parent,0xb0009,any);
+    if(ok) { _dispatch(_client,parent); ++_touchReports; } else _down[index]=was;
     CFRelease(parent); return ok;
 }
 - (BOOL)sendKey:(uint16_t)usage page:(uint16_t)page down:(BOOL)down {
-    if(!_client||!_dispatch||!_keyboard||!_setSender||!_sender) return NO;
+    if(!_client||!_dispatch||!_keyboard) return NO;
     Event e=_keyboard(NULL,mach_absolute_time(),page,usage,down,0);
     if(!e) return NO;
-    _setSender(e,_sender); _dispatch(_client,e); CFRelease(e); return YES;
+    // A touch-panel sender does not identify a hardware keyboard.
+    if(page==12&&_setSender&&_sender) _setSender(e,_sender);
+    _dispatch(_client,e); ++_keyReports; CFRelease(e); return YES;
 }
 - (BOOL)key:(uint16_t)usage down:(BOOL)down {
     if(usage<4||usage>231) return NO;
     if([self sendKey:usage page:7 down:down]) { _keys[usage]=down; return YES; } return NO;
 }
 - (BOOL)button:(NSString *)button {
+    if([button isEqual:@"home"]) {
+        id app=UIApplication.sharedApplication;
+        SEL home=NSSelectorFromString(@"_simulateHomeButtonPress");
+        if([app respondsToSelector:home]) { ((void(*)(id,SEL))objc_msgSend)(app,home); return YES; }
+        home=NSSelectorFromString(@"_simulateHomeButtonPressWithCompletion:");
+        if([app respondsToSelector:home]) { ((void(*)(id,SEL,id))objc_msgSend)(app,home,nil); return YES; }
+    }
     uint16_t usage=0;
     if([button isEqual:@"home"]) usage=0x40;
     else if([button isEqual:@"volume_up"]) usage=0xe9;
     else if([button isEqual:@"volume_down"]) usage=0xea;
     if(!usage) return NO;
     return [self sendKey:usage page:12 down:YES]&&[self sendKey:usage page:12 down:NO];
+}
+- (BOOL)openAppSwitcher {
+    id app=UIApplication.sharedApplication;
+    SEL open=NSSelectorFromString(@"_handleOpenAppSwitcherShortcut:");
+    if(![app respondsToSelector:open]) return NO;
+    ((void(*)(id,SEL,id))objc_msgSend)(app,open,nil); return YES;
 }
 static uint16_t asciiKey(unichar c,BOOL *shift) {
     *shift=NO;

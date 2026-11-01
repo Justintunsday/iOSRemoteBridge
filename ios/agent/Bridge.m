@@ -213,6 +213,7 @@
     return @{@"model":[NSString stringWithUTF8String:u.machine],@"ios":UIDevice.currentDevice.systemVersion,
         @"width":@(_capture.width),@"height":@(_capture.height),@"fps_requested":@(_fps),
         @"control":@(_control),@"orientation":@"natural_portrait",@"input_status":_input.status,
+        @"input_diagnostics":_input.diagnostics,
         @"hardware_encoder":_encoder.hardwareStatus?:@"unknown",@"low_latency_mode":@(_encoder.lowLatency),
         @"runtime_verified":@NO};
 }
@@ -309,10 +310,7 @@
     } else if([op isEqual:@"press_home"]) ok=[_input button:@"home"];
     else if([op isEqual:@"volume_up"]||[op isEqual:@"volume_down"]) ok=[_input button:op];
     else if([op isEqual:@"app_switcher"]) {
-        ok=[_input button:@"home"]; uint64_t gen=_generation;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,160*NSEC_PER_MSEC),dispatch_get_main_queue(),^{
-            if(self->_approved&&gen==self->_generation&&!self->_confirming) [self->_input button:@"home"];
-        });
+        ok=[_input openAppSwitcher];
     } else if([op isEqual:@"launch_app"]) {
         NSString *bundle=r[@"bundle_id"];
         Class cls=NSClassFromString(@"LSApplicationWorkspace");
@@ -322,6 +320,8 @@
             if([ws respondsToSelector:launch]) ok=((BOOL(*)(id,SEL,id))objc_msgSend)(ws,launch,bundle);
         }
     } else { [self reply:r result:nil error:@"unsupported operation"]; return; }
+    if(![op isEqual:@"touch"]||[r[@"phase"] intValue]==2)
+        [self status:@"input_result" extra:@{@"operation":op,@"submitted":@(ok),@"input_diagnostics":_input.diagnostics}];
     [self reply:r result:@{@"state":@"submitted",@"delivery_verified":@NO} error:ok?nil:@"HID unavailable, invalid arguments, unsupported ASCII, or private API refused operation"];
 }
 - (void)applyConfiguration:(NSDictionary *)r {
