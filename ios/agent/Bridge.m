@@ -7,6 +7,7 @@
 #import <sys/utsname.h>
 #import <unistd.h>
 #import "../common/IRBLocalPeer.h"
+#import "../common/IRBValidation.h"
 #import "../capture/IRBCapture.h"
 #import "../encoder/IRBEncoder.h"
 #import "../input/IRBInput.h"
@@ -29,6 +30,7 @@
     double _captureMs,_encodeMs,_scale;
     int _fps,_bitrate,_failures,_slow;
     dispatch_source_t _gesture;
+    NSDictionary *_pendingConfiguration;
 }
 - (BOOL)locked {
     Class cls=NSClassFromString(@"SBLockScreenManager");
@@ -119,6 +121,7 @@
     [_window.rootViewController dismissViewControllerAnimated:NO completion:nil];
     _window.hidden=YES; [_previousWindow makeKeyWindow]; _window=nil;
     _encoding=NO; _credit=NO;
+    _pendingConfiguration=nil;
     if(was) [_peer send:IRB_STOP flags:0 pts:0 data:IRBJSON(@{@"reason":reason})];
 }
 - (BOOL)startPipeline {
@@ -175,7 +178,14 @@
 }
 - (void)received:(irb_header)h data:(NSData *)data {
     if(h.type==IRB_STOP) { [self stopSession:@"connection ended"]; return; }
-    if(h.type==IRB_CREDIT) { if(!_encoding) _credit=YES; return; }
+    if(h.type==IRB_CREDIT) {
+        if(!_encoding) _credit=YES;
+        if(_pendingConfiguration&&_credit) {
+            NSDictionary *r=_pendingConfiguration; _pendingConfiguration=nil;
+            [self applyConfiguration:r];
+        }
+        return;
+    }
     if(h.type==IRB_START) {
         if(_approved||_confirming) return;
         NSDictionary *options=IRBDictionary(data);
@@ -195,6 +205,7 @@
     if(h.type!=IRB_CONTROL||!_approved) return;
     NSDictionary *r=IRBDictionary(data); NSString *op=r[@"op"];
     if(![op isKindOfClass:NSString.class]||![r[@"id"] isKindOfClass:NSNumber.class]) return;
+    if(!IRBValidateRequest(r,YES)) { [self reply:r result:nil error:@"invalid operation arguments"]; return; }
     if([op isEqual:@"get_device_info"]||[op isEqual:@"get_orientation"]||[op isEqual:@"get_connection_status"]) {
         [self reply:r result:[self info] error:nil]; return;
     }
@@ -220,11 +231,9 @@
         if(r[@"fps"]||r[@"scale"]) {
             int fps=[IRBNumber(r[@"fps"]) intValue]; double scale=IRBReal(r[@"scale"]);
             if((fps!=30&&fps!=60)||!isfinite(scale)||scale<.25||scale>1) { [self reply:r result:nil error:@"fps 30/60 and scale .25..1 required"]; return; }
-            if(_encoding||!_credit) { [self reply:r result:nil error:@"frame outstanding; retry after next frame ACK"]; return; }
-            [_display invalidate]; _display=nil; [_encoder stop];
-            if(_lastFrame) { CVPixelBufferRelease(_lastFrame); _lastFrame=NULL; }
-            _fps=fps; _scale=scale; _bitrate=rate;
-            if(![self startPipeline]) { [self stopSession:@"reconfiguration failed"]; return; }
+            if(_pendingConfiguration) { [self reply:r result:nil error:@"quality change already pending"]; return; }
+            if(_encoding||!_credit) { _pendingConfiguration=[r copy]; return; }
+            [self applyConfiguration:r]; return;
         } else if(![_encoder setBitrate:rate]) { [self reply:r result:nil error:_encoder.error]; return; }
         _bitrate=rate; [self reply:r result:[self info] error:nil]; return;
     }
@@ -249,10 +258,11 @@
     } else if([op isEqual:@"tap"]||[op isEqual:@"double_tap"]||[op isEqual:@"long_press"]||[op isEqual:@"swipe"]) {
         [self gesture:r]; return;
     } else if([op isEqual:@"type_text"]) {
-        if([r[@"text"] isKindOfClass:NSString.class]) ok=[_input typeASCII:r[@"text"]];
+        [self typeText:r]; return;
     } else if([op isEqual:@"key"]) {
-        if([r[@"usage"] isKindOfClass:NSNumber.class]&&[r[@"down"] isKindOfClass:NSNumber.class])
-            ok=[_input key:[r[@"usage"] unsignedShortValue] down:[r[@"down"] boolValue]];
+        NSNumber *usage=IRBNumber(r[@"usage"]);
+        if(usage&&usage.doubleValue==usage.intValue&&usage.intValue>=4&&usage.intValue<=231)
+            ok=[_input key:usage.unsignedShortValue down:YES]&&[_input key:usage.unsignedShortValue down:NO];
     } else if([op isEqual:@"press_home"]) ok=[_input button:@"home"];
     else if([op isEqual:@"volume_up"]||[op isEqual:@"volume_down"]) ok=[_input button:op];
     else if([op isEqual:@"app_switcher"]) {
@@ -270,6 +280,31 @@
         }
     } else { [self reply:r result:nil error:@"unsupported operation"]; return; }
     [self reply:r result:@{@"state":@"submitted",@"delivery_verified":@NO} error:ok?nil:@"HID unavailable, invalid arguments, unsupported ASCII, or private API refused operation"];
+}
+- (void)applyConfiguration:(NSDictionary *)r {
+    [_display invalidate]; _display=nil; [_encoder stop];
+    if(_lastFrame) { CVPixelBufferRelease(_lastFrame); _lastFrame=NULL; }
+    _fps=[IRBNumber(r[@"fps"]) intValue]; _scale=IRBReal(r[@"scale"]); _bitrate=[IRBNumber(r[@"bitrate"]) intValue];
+    if(![self startPipeline]) { [self stopSession:@"reconfiguration failed"]; return; }
+    [self reply:r result:[self info] error:nil];
+}
+- (void)typeText:(NSDictionary *)r {
+    NSString *text=r[@"text"];
+    if(![text isKindOfClass:NSString.class]||![_input supportsText:text]||!_input.ready) {
+        [self reply:r result:nil error:@"text requires supported US-layout ASCII (maximum 1024 characters) and ready HID"]; return;
+    }
+    if(!text.length) { [self reply:r result:@{} error:nil]; return; }
+    __block NSUInteger index=0;
+    _gesture=dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,0,0,dispatch_get_main_queue());
+    dispatch_source_set_timer(_gesture,DISPATCH_TIME_NOW,10*NSEC_PER_MSEC,NSEC_PER_MSEC);
+    dispatch_source_set_event_handler(_gesture,^{
+        BOOL ok=[self->_input typeASCII:[text substringWithRange:NSMakeRange(index++,1)]];
+        if(!ok||index>=text.length) {
+            dispatch_source_cancel(self->_gesture); self->_gesture=nil;
+            if(!ok) [self->_input releaseAll];
+            [self reply:r result:@{@"state":@"completed",@"delivery_verified":@NO} error:ok?nil:@"HID text injection failed"];
+        }
+    }); dispatch_resume(_gesture);
 }
 - (void)gesture:(NSDictionary *)r {
     NSString *op=r[@"op"]; BOOL swipe=[op isEqual:@"swipe"],twice=[op isEqual:@"double_tap"];

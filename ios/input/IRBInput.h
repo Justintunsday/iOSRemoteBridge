@@ -7,5 +7,6 @@
 - (BOOL)key:(uint16_t)usage down:(BOOL)down;
 - (BOOL)button:(NSString *)button;
 - (BOOL)typeASCII:(NSString *)text;
+- (BOOL)supportsText:(NSString *)text;
 - (void)releaseAll;
 @end

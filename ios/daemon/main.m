@@ -10,6 +10,7 @@
 #import <unistd.h>
 #import <signal.h>
 #import "../common/IRBLocalPeer.h"
+#import "../common/IRBValidation.h"
 
 static NSData *privateFile(NSString *path,NSUInteger max) {
     int fd=open(path.fileSystemRepresentation,O_RDONLY|O_NOFOLLOW);
@@ -42,6 +43,9 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
     uint64_t _generation,_cooldown,_connectedAt,_lastActivity,_ackPTS,_videoSentAt,_rateStart;
     NSUInteger _pendingBytes,_commands;
     BOOL _authenticated,_authorized,_awaitingAck;
+    double _frameCycleMs;
+    int _adaptiveBitrate,_bitrateCeiling;
+    uint64_t _lastAdapt;
     int _localSocket;
 }
 - (BOOL)start {
@@ -125,6 +129,7 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
     _authenticated=NO; _authorized=NO; _awaitingAck=NO;
     _received=[NSMutableData data]; _connectedAt=IRBNow(); _lastActivity=_connectedAt;
     _commands=0; _rateStart=_connectedAt;
+    _frameCycleMs=0; _adaptiveBitrate=8000000; _bitrateCeiling=8000000; _lastAdapt=_connectedAt;
     uint64_t generation=_generation; __weak IRBServer *weak=self;
     nw_connection_set_queue(c,dispatch_get_main_queue());
     nw_connection_set_state_changed_handler(c,^(nw_connection_state_t state,nw_error_t error) {
@@ -137,7 +142,7 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
     if(!_connection) return;
     nw_connection_t c=_connection; _connection=nil; ++_generation;
     _authenticated=NO; _authorized=NO; _awaitingAck=NO; _received=nil; _pendingBytes=0;
-    _cooldown=IRBNow()+2000000;
+    _cooldown=MAX(_cooldown,IRBNow()+2000000);
     [_bridge send:IRB_STOP flags:0 pts:0 data:IRBJSON(@{@"reason":reason})];
     nw_connection_cancel(c); NSLog(@"[IRB] %@",reason);
 }
@@ -192,10 +197,30 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
         else if(h.type==IRB_CREDIT) {
             if(!_authorized||!_awaitingAck||h.pts_us!=_ackPTS||h.length) { [self disconnect:@"invalid frame acknowledgement"]; return; }
             _awaitingAck=NO; [_bridge send:IRB_CREDIT flags:0 pts:h.pts_us data:nil];
+            double cycle=(now-_ackPTS)/1000.0;
+            _frameCycleMs=_frameCycleMs?_frameCycleMs*.9+cycle*.1:cycle;
+            if(now-_lastAdapt>3000000) {
+                int desired=_adaptiveBitrate;
+                if(_frameCycleMs>80) desired=MAX(500000,(int)(_adaptiveBitrate*.8));
+                else if(_frameCycleMs<35) desired=MIN(_bitrateCeiling,(int)(_adaptiveBitrate*1.08));
+                if(desired!=_adaptiveBitrate) {
+                    _adaptiveBitrate=desired;
+                    [_bridge send:IRB_CONTROL flags:0 pts:0 data:IRBJSON(@{@"id":@0,@"op":@"configure",@"bitrate":@(desired)})];
+                }
+                _lastAdapt=now;
+            }
         } else {
             NSDictionary *r=IRBDictionary(data);
-            if(!_authorized||![r[@"op"] isKindOfClass:NSString.class]||![r[@"id"] isKindOfClass:NSNumber.class]) { [self disconnect:@"invalid or unapproved command"]; return; }
+            NSNumber *ident=IRBNumber(r[@"id"]);
+            if(!_authorized||![r[@"op"] isKindOfClass:NSString.class]||!ident||ident.doubleValue!=ident.intValue||ident.intValue<=0) { [self disconnect:@"invalid or unapproved command"]; return; }
+            if(!IRBValidateRequest(r,NO)) {
+                [self send:IRB_RESPONSE flags:0 pts:0 data:IRBJSON(@{@"id":ident,@"ok":@NO,@"error":@"invalid operation arguments"})]; continue;
+            }
             if([r[@"op"] isEqual:@"disconnect"]) { [self disconnect:@"remote disconnected"]; return; }
+            if([r[@"op"] isEqual:@"configure"]&&IRBNumber(r[@"bitrate"])) {
+                int rate=[r[@"bitrate"] intValue];
+                if(rate>=500000&&rate<=20000000) { _bitrateCeiling=rate; _adaptiveBitrate=rate; _lastAdapt=now; }
+            }
             [_bridge send:IRB_CONTROL flags:0 pts:0 data:data];
         }
     }
@@ -205,7 +230,14 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
     if(!_authenticated) return;
     if(h.type==IRB_RESPONSE) {
         NSDictionary *r=IRBDictionary(data);
+        if(IRBNumber(r[@"id"])&&[r[@"id"] intValue]==0) return; // internal adaptive bitrate response
         if([r[@"event"] isEqual:@"authorized"]) _authorized=YES;
+        if([r[@"result"] isKindOfClass:NSDictionary.class]&&r[@"result"][@"encoded_frames"]) {
+            NSMutableDictionary *stats=[r[@"result"] mutableCopy];
+            stats[@"capture_to_client_ack_ms_ewma"]=@(_frameCycleMs);
+            stats[@"adaptive_bitrate"]=@(_adaptiveBitrate);
+            NSMutableDictionary *augmented=[r mutableCopy]; augmented[@"result"]=stats; data=IRBJSON(augmented);
+        }
         [self send:IRB_RESPONSE flags:0 pts:h.pts_us data:data];
     } else if(h.type==IRB_VIDEO&&_authorized) {
         if(_awaitingAck) { [self disconnect:@"bridge violated frame credit"]; return; }

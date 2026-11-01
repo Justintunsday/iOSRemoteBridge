@@ -6,6 +6,12 @@ build/
 out/
 dist/
 .theos/
+.theos-toolchain/
+.vcpkg/
+.vcpkg-cache/
+extracted-package/
+build-logs/
+validation-tests
 packages/
 vcpkg_installed/
 __pycache__/

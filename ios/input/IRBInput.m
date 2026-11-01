@@ -125,10 +125,14 @@ static uint16_t asciiKey(unichar c,BOOL *shift) {
     for(NSUInteger i=0;i<digits.length;++i) if(c==[digits characterAtIndex:i]) { *shift=YES; return i==9?0x27:(uint16_t)(0x1e + i); }
     return 0;
 }
-- (BOOL)typeASCII:(NSString *)text {
+- (BOOL)supportsText:(NSString *)text {
     if(text.length>1024) return NO;
     // Validate the whole string before any side effects; unsupported Unicode is an error.
     for(NSUInteger i=0;i<text.length;++i) { BOOL shift; if(!asciiKey([text characterAtIndex:i],&shift)) return NO; }
+    return YES;
+}
+- (BOOL)typeASCII:(NSString *)text {
+    if(![self supportsText:text]) return NO;
     for(NSUInteger i=0;i<text.length;++i) {
         BOOL shift; uint16_t code=asciiKey([text characterAtIndex:i],&shift);
         if(shift&&![self key:0xe1 down:YES]) return NO;
