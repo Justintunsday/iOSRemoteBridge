@@ -30,11 +30,17 @@ F10 uses an entitled IOHIDUserDevice in the mobile daemon. SpringBoard controls
 AssistiveTouch and validates every native input request before forwarding it over
 local-only IRB_HID messages. Their timestamp field carries the TLS connection
 generation; stale-session requests are ignored. Keyboard report 1 carries modifiers
-and up to six keys; report 2 carries absolute pointer coordinates; report 3 carries
-native relative-mouse buttons and wheel. These are system mouse/keyboard services,
-not digitizer reports. Device removal releases all input. Native support is
-runtime checked and failures remain visible. Original touch automation remains
-available outside this mode.
+and up to six keys. A separate mouse device uses report 3 for signed X/Y deltas,
+buttons and wheel. Foreground Windows WM_INPUT packets provide relative motion;
+the viewer sends movement from raw events at up to 125 Hz and sends button edges
+immediately. A loopback-only wake byte interrupts the network select wait; all
+commands still travel over pinned TLS. Unsent motion is accumulated while button
+and wheel events remain ordered. A trailing timer handles the end of a movement.
+Viewer rotation transforms movement directions. Focus loss, resize, disconnect
+and F10 release capture, queued motion and held input. The final backend registers
+no absolute mouse collection: on the target iOS 16.1.1 it did not reliably move
+the AssistiveTouch pointer. Native support is runtime checked and failures remain
+visible. Original touch automation remains available outside this mode.
 
 Capture renders the native display into a bounded CVPixelBufferPool with
 IOSurface backing. It does not treat IOSurface allocation as framebuffer access.

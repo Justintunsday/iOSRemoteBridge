@@ -40,7 +40,8 @@ AUTH field and retains its one-frame behavior. Credits remain ordered per frame.
 | key_event | usage (4..231), down (JSON boolean); needs keyboard_mode enabled, never replays on reconnect |
 | press_home / app_switcher / control_center | no parameters; guarded SpringBoard navigation handlers |
 | volume_up / volume_down | no parameters; device delivery needs verification |
-| mouse_event | x/y (0..1), buttons (bitmask 0..31), wheel (-127..127); needs keyboard_mode enabled |
+| mouse_delta | dx/dy (signed integers -32767..32767), buttons (bitmask 0..31), wheel (-127..127); needs keyboard_mode enabled |
+| mouse_event | legacy absolute operation; returns an update-client error on the relative-only native backend |
 | launch_app | bundle_id; dynamic workspace API; executes directly in a control session |
 | configure | bitrate (500000..20000000); optional fps (30/60) and scale (.25..1) together |
 | request_keyframe | no parameters; recovery IDR |

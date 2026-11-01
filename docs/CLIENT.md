@@ -78,22 +78,29 @@ volume, and Up / Down perform upward/downward swipes. Local pairing, text and
 bitrate fields, and the sharpness slider, keep their normal keyboard behavior.
 Mouse wheel scrolling is available over the video.
 
-System mouse+keys / F10 creates an iOS virtual HID mouse and keyboard. It enables
-AssistiveTouch for the system pointer and temporarily hides its persistent menu
-button. There is no extra approval prompt. Focus the video to type; H/C then type
-characters. Mouse hover moves the system pointer, buttons and wheel go through
-native mouse reports, and a held left button drags. Right/middle buttons follow
-iOS AssistiveTouch button assignments. Absolute positioning and relative button
-reports are separate, since iOS treats these services differently.
+System mouse+keys / F10 enables a native iOS HID keyboard and relative mouse.
+The viewer captures the mouse inside the video and hides the Windows cursor.
+Move the iPhone system pointer to the target, then click or drag. Input comes
+from foreground Windows Raw Input; iOS applies its own pointer behavior.
+Right, middle and extra buttons follow AssistiveTouch assignments; the wheel is native.
+Movement is sent from raw events at up to 125 Hz, with a trailing flush. New input
+wakes the TLS worker directly; queued movement is accumulated without crossing
+button/wheel edges. The title's input queue value measures client queue time,
+excluding Windows message delivery, network, iOS processing and display latency.
 
-F1–F10 and Esc remain local viewer controls. F9 or the title-bar menu restores
-hidden tools. Focus loss releases held keys and mouse buttons. Turning the mode
-off, locking or disconnecting releases and removes the virtual device, and
-restores the AssistiveTouch settings changed by this session. Reconnect starts
-with the mode off. This is a six-key US-layout hardware keyboard with modifiers;
-host IME composition and arbitrary Unicode text transfer are not implemented.
-Windows may retain system-reserved key combinations. If native-device creation
-fails, the error is shown and the checkbox stays off.
+Press F10 again to disable the mode and release the mouse. Alt+Tab, focus loss,
+window resize, disconnect and closing the viewer also release capture and held
+input. After returning to an enabled but uncaptured viewer, click the video once
+to capture again; that capture click is not sent to the phone. F1–F10 and Esc
+remain local controls; Esc disconnects. F9 restores hidden tools and releases capture.
+H/C type letters in this mode. Local edit fields keep their usual input.
+
+AssistiveTouch is enabled without an approval dialog. Settings changed by the
+session are restored normally when it ends; iOS may display its own menu button.
+Reconnect starts with the mode off. The keyboard supports six simultaneous
+US-layout keys plus modifiers. Host IME composition and arbitrary Unicode transfer
+are not implemented; Windows may retain reserved key combinations. Native-device
+or Raw Input startup failures remain visible.
 
 Statistics show decoded FPS, **network round-trip time**, last decode time and
 the selected decoder. RTT is not end-to-end display latency. D3D11VA is attempted

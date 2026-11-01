@@ -49,7 +49,9 @@ file authorizes viewing and requested control while unlocked.
   generation. Network packets cannot invoke the local HID message type.
   Disconnect destroys the HID device and releases all buttons/keys. The viewer
   also releases held input on focus loss and uses focused-window messages rather
-  than a global keyboard hook. F10 resets off on reconnect. AssistiveTouch settings
+  than a global keyboard hook. Native mouse input is foreground Raw Input;
+  focus loss, resize, disconnect and F10 release the Windows cursor restriction.
+  F10 resets off on reconnect. AssistiveTouch settings
   changed by a normal session are restored when it ends; a process crash can
   leave an accessibility setting enabled until changed in Settings.
   Generic actions can interact with permission, payment or deletion screens;

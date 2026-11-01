@@ -16,6 +16,8 @@ short measurements and remaining gates. Sustained 60 FPS, hardware encoder use,
 glass-to-glass latency and long-term power/stability are not verified.
 After bounded pipelining, a short Windows sample averaged 59.86 decoded FPS.
 The owner confirmed corrected colors and smoother motion; see the report's limits.
+The [November 2 native-pointer report](docs/DEVICE_VALIDATION_2026-11-02.md)
+records the relative mouse correction and its physical test results.
 
 ## Implemented
 
@@ -29,7 +31,7 @@ The owner confirmed corrected colors and smoother motion; see the report's limit
 - Native Win32 receiver with D3D11VA selection/software fallback, mouse/text
   control, rotation, aspect fitting, adjustable sharpening, quality controls,
   collapsible toolbar, VSync, FSR 1, an optional single-frame FSR 4/3/2.3 experiment,
-  navigation shortcuts, native iOS system mouse/keyboard input, reconnect and
+  navigation shortcuts, captured native iOS relative mouse/keyboard input, reconnect and
   FPS/RTT/decode statistics.
 - Python API/CLI, JSON-lines adapter and optional standard MCP stdio tools.
 - GitHub Actions builds, TLS/H.264 simulator tests, validation, logs/artifacts

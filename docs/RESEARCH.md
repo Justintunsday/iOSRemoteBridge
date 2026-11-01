@@ -237,11 +237,15 @@ The target also requires the narrow IOKit user-client exception for
 but IOServiceOpen returned `0xe00002e2` (not permitted). The same exception is
 listed in the target's system BTLEServer executable's entitlements.
 
-The report descriptor contains a keyboard, an absolute-position mouse collection
-and a relative mouse collection for native buttons/wheel. Pointer support and
-private AssistiveTouch setting selectors must still be tested on each iOS build.
-`iosremotebridged --hid-check` registers an idle device, prints its API result and
-kernel registry entry ID, then removes it without moving or pressing anything.
-This diagnoses creation, not visible delivery. The application-specific approval
+The final backend registers separate keyboard and relative-mouse devices. An
+absolute/relative split with edge calibration disabled registered correctly but
+did not reliably move the system pointer on this iOS 16.1.1 target. The replacement
+uses signed relative movement, buttons and wheel on a single native mouse service.
+Foreground [Windows Raw Input](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-rawmouse)
+supplies movement counts, and iOS applies its own pointer behavior.
+`iosremotebridged --hid-check` registers idle devices, prints API results and
+kernel registry IDs, then removes them without moving or pressing anything.
+Creation alone does not establish visible delivery. The November 2 device report
+records actual movement and a Calculator click. The application-specific approval
 windows were removed at the owner's request; pairing, control selection, lock
 checks and session cleanup remain enforced.
