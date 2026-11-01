@@ -548,7 +548,7 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
     case WM_KILLFOCUS: endDrag(); if(!releaseHeldKeys()) disconnect(); return 0;
     case WM_ACTIVATEAPP: if(!w) { endDrag(); if(!releaseHeldKeys()) disconnect(); } break;
     case WM_TIMER:
-        if(w==PointerTimer&&keyboardApproved&&mouseCaptured&&mouseMotion.pending()) {
+        if(w==PointerTimer&&keyboardApproved&&mouseCaptured&&mouseMotion.pending()&&mouseTimeUS()-lastMouseSendUS>=8000) {
             if(!sendSystemMouse()) disconnect(); return 0;
         }
         if(w==KeyboardTimer&&keyboardPending) {
