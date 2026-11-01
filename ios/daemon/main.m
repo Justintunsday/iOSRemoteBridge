@@ -259,12 +259,11 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
         return;
     }
     if(h.type==IRB_STOP) {
-        // disconnect: already cleared the connection before asking the bridge
-        // to stop. Its acknowledgement must not extend a normal reconnect delay
-        // to the cooldown reserved for a local stop or rejected approval.
+        // A late acknowledgement cannot extend the reconnect delay. Custom
+        // approval/rejection cooldowns are unnecessary for paired auto-start.
         if(!_connection) return;
         NSDictionary *stop=IRBDictionary(data); NSString *reason=[stop[@"reason"] isKindOfClass:NSString.class]?stop[@"reason"]:@"session stopped on iPhone";
-        [self disconnect:reason]; _cooldown=IRBNow()+30000000; return;
+        [self disconnect:reason]; return;
     }
     if(!_authenticated) return;
     if(h.type==IRB_RESPONSE) {
@@ -284,8 +283,18 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
     }
 }
 @end
-int main(void) {
+int main(int argc,const char *argv[]) {
     @autoreleasepool {
+        if(argc==2&&strcmp(argv[1],"--hid-check")==0) {
+            // Local SSH diagnostic: register an idle HID device, inspect its
+            // kernel registry ID, then remove it. No pointer movement or keys.
+            IRBNativeHID *hid=[IRBNativeHID new]; BOOL ok=[hid start];
+            if(ok) [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.3]];
+            NSMutableDictionary *result=[[hid diagnostics] mutableCopy];
+            result[@"ok"]=IRBBool(ok); if(!ok) result[@"error"]=hid.error?:@"native HID failed";
+            NSData *json=IRBJSON(result); fwrite(json.bytes,1,json.length,stdout); fputc('\n',stdout);
+            [hid stop]; return ok?0:1;
+        }
         signal(SIGPIPE,SIG_IGN);
         IRBServer *server=[IRBServer new];
         if(![server start]) return 78;
