@@ -1,5 +1,6 @@
 #include "Connection.h"
 #include "irb_protocol.h"
+#include "RpcReply.h"
 #include <windowsx.h>
 #include <commdlg.h>
 #include <shellapi.h>
@@ -87,7 +88,7 @@ void connectClient() {
             PostMessageW(window,StatusMessage,0,0);
         };
         connection->onResponse=[](const json &reply) {
-            if(reply.contains("ok")&&!reply.value("ok",false)) {
+            if(reply.contains("ok")&&!responseSucceeded(reply)) {
                 { std::lock_guard<std::mutex> lock(statusMutex); responseNotice=reply.value("error",std::string("operation failed")); }
                 PostMessageW(window,ResponseMessage,0,0);
             }

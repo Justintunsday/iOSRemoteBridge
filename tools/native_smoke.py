@@ -27,6 +27,7 @@ def run(executable, fixture, wrong_pin):
         config_path.write_text(json.dumps(config))
         auth_seen = threading.Event()
         ack_seen = threading.Event()
+        actions_seen = []
         errors = []
         def serve():
             try:
@@ -48,11 +49,20 @@ def run(executable, fixture, wrong_pin):
                     send(p.VIDEO, Path(fixture).read_bytes(), 123456)
                     while True:
                         h = p.unpack(p.recv_exact(sock, 24)); payload = p.recv_exact(sock, h.length)
-                        if h.kind == p.CREDIT and h.pts_us == 123456: ack_seen.set()
+                        if h.kind == p.CREDIT and h.pts_us == 123457: ack_seen.set()
                         elif h.kind == p.PING: send(p.PONG, payload, h.pts_us)
                         elif h.kind == p.CONTROL:
                             request = json.loads(payload)
-                            send(p.RESPONSE, {"id": request["id"], "ok": True, "result": {"model": "TLS_SIMULATOR"}})
+                            actions_seen.append(request["op"])
+                            if request["op"] == "tap":
+                                send(p.RESPONSE, {"id": request["id"], "ok": 0, "error": "invalid coordinates"})
+                            else:
+                                # Match the actual iOS C-int boxing bug for input
+                                # replies; get_device_info exercises standard booleans.
+                                send(p.RESPONSE, {"id": request["id"], "ok": True if request["op"] == "get_device_info" else 1,
+                                                  "result": {"model": "TLS_SIMULATOR"}})
+                            if len(actions_seen) == 7:
+                                send(p.VIDEO, Path(fixture).read_bytes(), 123457)
             except (EOFError, ConnectionError): pass
             except Exception as exc: errors.append(str(exc))
         thread = threading.Thread(target=serve, daemon=True); thread.start()
@@ -62,8 +72,8 @@ def run(executable, fixture, wrong_pin):
             subprocess.run(command, check=True, timeout=25)
             if wrong_pin:
                 if auth_seen.is_set(): raise AssertionError("credentials sent to incorrect certificate")
-            elif not auth_seen.is_set() or not ack_seen.wait(2):
-                raise AssertionError("missing authentication or decoded-frame acknowledgement")
+            elif not auth_seen.is_set() or not ack_seen.wait(2) or actions_seen != ["get_device_info", "press_home", "touch", "touch", "touch", "tap", "get_device_info"]:
+                raise AssertionError("missing actions or decoded-frame acknowledgement after input")
             if errors: raise AssertionError(errors)
         finally:
             listener.close(); thread.join(timeout=3)

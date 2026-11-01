@@ -26,5 +26,12 @@ int main(void) { @autoreleasepool {
     for(NSDictionary *r in bad) require(!IRBValidateRequest(r,NO));
     require(IRBDictionary(nil)==nil);
     require(IRBDictionary([@"[]" dataUsingEncoding:NSUTF8StringEncoding])==nil);
-    puts("Foundation schema checks: hostile types, nulls, ranges and reserved IDs passed");
+    for(NSString *error in @[@"",@"simulated rejection"]) {
+        NSDictionary *reply=IRBDictionary(IRBJSON(IRBReply(@{@"id":@42},@{@"state":@"submitted"},error.length?error:nil)));
+        require(CFGetTypeID((__bridge CFTypeRef)reply[@"ok"])==CFBooleanGetTypeID());
+        require([reply[@"ok"] boolValue]==(error.length==0));
+        require([reply[@"id"] isEqual:@42]);
+        require(error.length?reply[@"error"]!=nil:reply[@"result"]!=nil);
+    }
+    puts("Foundation schema checks and real JSON boolean reply serialization passed");
 } return 0; }

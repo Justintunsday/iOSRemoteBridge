@@ -1,6 +1,7 @@
 // IOHID declarations/dispatch pattern informed by ScreenMirror (MIT).
 // No ZXTouch GPL implementation is incorporated. See THIRD_PARTY_NOTICES.md.
 #import "IRBInput.h"
+#import "../common/IRBCommon.h"
 #import <dlfcn.h>
 #import <mach/mach_time.h>
 #import <UIKit/UIKit.h>
@@ -72,12 +73,12 @@ static void observed(void *target,void *ref,void *service,Event event) {
 - (BOOL)ready { return _client&&_dispatch&&_digitizer&&_finger&&_append&&_setInt&&_setSender&&_sender; }
 - (NSString *)status { return self.ready?@"symbols resolved; delivery unverified":@"waiting for HID APIs and a physical touchscreen event"; }
 - (NSDictionary *)diagnostics {
-    return @{@"dispatch_client":@(_client!=NULL),@"monitor_client":@(_monitor!=NULL),
-        @"touch_ready":@(self.ready),@"sender_observed":@(_sender!=0),
+    return @{@"dispatch_client":IRBBool(_client!=NULL),@"monitor_client":IRBBool(_monitor!=NULL),
+        @"touch_ready":IRBBool(self.ready),@"sender_observed":IRBBool(_sender!=0),
         @"touch_reports_submitted":@(_touchReports),@"key_reports_submitted":@(_keyReports),
-        @"home_selector":@([UIApplication.sharedApplication respondsToSelector:NSSelectorFromString(@"_simulateHomeButtonPress")]||
+        @"home_selector":IRBBool([UIApplication.sharedApplication respondsToSelector:NSSelectorFromString(@"_simulateHomeButtonPress")]||
                           [UIApplication.sharedApplication respondsToSelector:NSSelectorFromString(@"_simulateHomeButtonPressWithCompletion:")]),
-        @"switcher_selector":@([UIApplication.sharedApplication respondsToSelector:NSSelectorFromString(@"_handleOpenAppSwitcherShortcut:")])};
+        @"switcher_selector":IRBBool([UIApplication.sharedApplication respondsToSelector:NSSelectorFromString(@"_handleOpenAppSwitcherShortcut:")])};
 }
 - (BOOL)touch:(int)index phase:(int)phase x:(double)x y:(double)y {
     if(!self.ready||index<0||index>=10||phase<0||phase>2||!isfinite(x)||!isfinite(y)||x<0||x>1||y<0||y>1) return NO;

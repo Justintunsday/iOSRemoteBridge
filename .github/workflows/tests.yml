@@ -1,7 +1,7 @@
 name: tests
 on:
   push:
-    branches: [main, 'feature/**']
+    branches: [main, 'feature/**', 'codex/**']
   pull_request:
   workflow_dispatch:
 permissions:

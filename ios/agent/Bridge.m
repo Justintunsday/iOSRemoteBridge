@@ -79,9 +79,7 @@
 }
 - (void)send:(NSDictionary *)object { [_peer send:IRB_RESPONSE flags:0 pts:0 data:IRBJSON(object)]; }
 - (void)reply:(NSDictionary *)request result:(id)result error:(NSString *)error {
-    NSMutableDictionary *out=[@{@"id":request[@"id"]?:@0,@"ok":@(!error)} mutableCopy];
-    if(error) out[@"error"]=error; else out[@"result"]=result?:@{};
-    [self send:out];
+    [self send:IRBReply(request,result,error)];
 }
 - (void)prompt:(NSString *)message decision:(void(^)(BOOL))decision {
     if(_confirming||[self locked]) { [self status:@"approval_unavailable" extra:@{}]; decision(NO); return; }

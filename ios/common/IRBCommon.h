@@ -14,6 +14,16 @@ static inline NSDictionary *IRBDictionary(NSData *data) {
     id obj=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
     return [obj isKindOfClass:NSDictionary.class]?obj:nil;
 }
+static inline NSNumber *IRBBool(BOOL value) {
+    // Boxing a C comparison or !expression can produce JSON 0/1 instead of
+    // true/false. Use explicit Foundation boolean objects on the wire.
+    return value?@YES:@NO;
+}
+static inline NSDictionary *IRBReply(NSDictionary *request,id result,NSString *error) {
+    NSMutableDictionary *reply=[@{@"id":request[@"id"]?:@0,@"ok":IRBBool(error==nil)} mutableCopy];
+    if(error) reply[@"error"]=error; else reply[@"result"]=result?:@{};
+    return reply;
+}
 static inline NSNumber *IRBNumber(id value) {
     return [value isKindOfClass:NSNumber.class]?value:nil;
 }

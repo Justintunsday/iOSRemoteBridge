@@ -1,7 +1,7 @@
 name: build-ios
 on:
   push:
-    branches: [main, 'feature/**']
+    branches: [main, 'feature/**', 'codex/**']
     paths: ['ios/**', 'shared/**', '.github/workflows/build-ios.yml']
   pull_request:
   workflow_dispatch:
