@@ -270,6 +270,45 @@ volume, swipes and F10-approved typing, the owner replied **"完成"** (complete
 There was no separate instrumented per-shortcut delivery trace. Broader input,
 real-content experimental-FSR quality and long-duration tests remain outstanding.
 
+## Native system mouse/keyboard and automatic paired sessions
+
+This update supersedes the custom approval policy described in earlier test
+entries. At the owner's request, all iOSRemoteBridge Allow/Reject windows were
+removed: connection, keyboard mode, text, single keys and app launch execute
+directly after pairing authentication while unlocked. Locked sessions still
+fail; TLS pin/token, read-only control selection, expiry and cleanup remain.
+
+Windows source `9547bde090402878ffa615736b5fc2ad0b0941e4` passed
+[build 41319953103](https://github.com/Justintunsday/iOSRemoteBridge/actions/runs/41319953103):
+eight CTest cases, GUI layout checks, TLS/H.264 integration and color decoding.
+The HID report test independently parses report lengths and checks modifier
+bits, rollover, releases, absolute coordinate bounds and mouse button/wheel bytes.
+The Python suite passed all 16 tests locally and in CI. The updated EXE was
+installed to dist/Windows and opened with the existing private pairing file.
+
+The final phone package is source `47545ca61b41e7be1995585dc8a3238efa7db013`,
+[iOS build 41320841411](https://github.com/Justintunsday/iOSRemoteBridge/actions/runs/41320841411).
+The first native HID probe found the resource and runtime HID entitlement but
+failed IOServiceOpen with 0xe00002e2. Adding the narrow IOKit exception for
+IOHIDResourceDeviceUserClient corrected this. The installed package's local
+`iosremotebridged --hid-check` then passed as both root and **mobile**, returning
+native_hid_active=true and nonzero registry entry IDs (mobile sample 4295058904).
+The probe registers an idle device, submits zero-state reports, and removes it;
+it does not move the pointer, type text or prove visible delivery.
+
+F10 now uses IOHIDUserDevice keyboard reports, absolute pointer positioning and
+relative-mouse buttons/wheel. Mouse hover is coalesced to one update per 16 ms;
+button edges are immediate. Focus loss releases input; disconnect or disabling
+removes the device. AssistiveTouch is temporarily enabled for the system pointer
+and changes made by this session are restored normally afterward. F1–F10/Esc
+remain viewer controls; touch mode retains the earlier navigation shortcuts.
+
+The phone remained locked after the reload, and the owner was asked to unlock
+without tapping Allow. Unlocked automatic connection, the visible system pointer,
+native clicks/drag/wheel and actual hardware-keyboard typing remain pending the
+owner's physical test. Do not treat successful device registration as completion
+of those delivery checks.
+
 ## Remaining validation
 
 Check longer Windows input/reconnect sessions, broader cross-app capture,
