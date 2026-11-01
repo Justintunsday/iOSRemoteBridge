@@ -43,5 +43,13 @@ pointer still felt delayed. The first Windows version used only a low-priority
 The follow-up sends from raw events at up to 125 Hz, wakes the worker directly and
 accumulates unsent motion without merging button edges. The title reports client
 queue time. A cross-thread loopback wake test and queue-order regression test were
-added. Physical feel after this latency update remains pending; no glass-to-glass
-latency number or long-duration stability result has been established.
+added. Final Windows source `f5ca7b845ace110f595d52bd04076a22c653c8f0` passed
+[build 41354010336](https://github.com/Justintunsday/iOSRemoteBridge/actions/runs/41354010336)
+with all ten CTest cases, including input-delivery wake/queue checks, plus the
+existing GUI, TLS/H.264 and color checks. The installed EXE matches that artifact;
+the ZIP and checksums were regenerated with current instructions.
+
+After testing continuous physical mouse movement on the updated viewer, the owner
+reported **"明显更跟手了"** (noticeably more responsive). This confirms a subjective
+improvement; no glass-to-glass latency number or long-duration stability result
+has been established.
