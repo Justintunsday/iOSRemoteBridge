@@ -45,7 +45,7 @@ static BOOL hex64(id value) {
     NSDictionary *values=@{(__bridge id)kSecValueData:profile.JSONData,(__bridge id)kSecAttrAccessible:(__bridge id)kSecAttrAccessibleWhenUnlockedThisDeviceOnly};
     OSStatus status=SecItemUpdate((__bridge CFDictionaryRef)[self query],(__bridge CFDictionaryRef)values);
     if(status==errSecItemNotFound) { NSMutableDictionary *add=[[self query] mutableCopy];[add addEntriesFromDictionary:values];status=SecItemAdd((__bridge CFDictionaryRef)add,NULL); }
-    if(status!=errSecSuccess&&error) *error=profileError(@"无法将配对信息保存到钥匙串");return status==errSecSuccess;
+    if(status!=errSecSuccess&&error) *error=[NSError errorWithDomain:NSOSStatusErrorDomain code:status userInfo:@{NSLocalizedDescriptionKey:@"无法将配对信息保存到钥匙串"}];return status==errSecSuccess;
 }
 + (void)remove { SecItemDelete((__bridge CFDictionaryRef)[self query]); }
 @end

@@ -4,10 +4,11 @@
 #if TARGET_OS_SIMULATOR
 static BOOL smokeRequested(void) { return [NSProcessInfo.processInfo.arguments containsObject:@"--irb-smoke"]; }
 static NSURL *smokeFile(NSString *name) { return [[NSFileManager.defaultManager URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask].firstObject URLByAppendingPathComponent:name]; }
+static NSError *keychainError;
 void IRBPrepareSimulatorSmoke(void) {
     if(!smokeRequested()) return;
     NSData *data=[NSData dataWithContentsOfURL:smokeFile(@"irb-smoke-profile.json")];
-    IRBProfile *profile=data?[IRBProfile fromData:data error:NULL]:nil;if(profile) [IRBProfileStore save:profile error:NULL];
+    IRBProfile *profile=data?[IRBProfile fromData:data error:NULL]:nil;if(profile) [IRBProfileStore save:profile error:&keychainError];
 }
 void IRBStartSimulatorSmoke(IRBControllerViewController *controller) {
     if(!smokeRequested()) return;
@@ -52,7 +53,7 @@ void IRBStartSimulatorSmoke(IRBControllerViewController *controller) {
     if(!profile) {finish(NO,@"test profile missing");return;}
     IRBProfile *stored=IRBProfileStore.load;
     result[@"keychain_valid"]=@([stored.host isEqual:profile.host]&&stored.port==profile.port&&[stored.token isEqual:profile.token]&&[stored.certificatePin isEqual:profile.certificatePin]);
-    if(![result[@"keychain_valid"] boolValue]) {finish(NO,@"pairing Keychain round trip failed");return;}
+    if(![result[@"keychain_valid"] boolValue]) {result[@"keychain_status"]=@(keychainError.code);finish(NO,@"pairing Keychain round trip failed");return;}
     [controller.session connect:profile fps:60 control:YES];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,35*NSEC_PER_SEC),dispatch_get_main_queue(),^{finish(NO,@"simulator integration timed out");});
 }
