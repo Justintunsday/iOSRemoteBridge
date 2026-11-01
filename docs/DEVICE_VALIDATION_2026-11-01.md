@@ -83,10 +83,9 @@ was installed and SpringBoard reloaded. Following fresh physical approval:
 - An earlier retest ended when the phone locked; the daemon logged the lock
   and closed TLS, confirming this shutdown path in that session.
 
-This retest exercises the Python control API and the same phone-side input
-path used by Windows. The Windows mouse/buttons still need an interactive
-retest of this package. Text, keyboard, multi-touch and volume are not implied
-to work by these observations.
+This initial retest exercises the Python control API and the same phone-side
+input path used by Windows. The later Windows test is recorded below. Text,
+keyboard, multi-touch and volume are not implied to work by these observations.
 
 The next Windows retest exposed a separate client failure: each action reply
 closed the session and requested approval again. The observed window title was
@@ -106,10 +105,22 @@ Clock. The viewer continued to display FPS/D3D11VA after these actions; the
 phone's log showed no further disconnect during that test. A final drag test
 was stopped by the owner's physical Escape key and remains unverified.
 
-The owner subsequently reported brightness flicker. The existing GDI paint
-cleared the displayed video area before every frame. Buffered presentation,
-aspect-constrained resizing and compact controls are under validation; no
-physical claim that brightness flicker is resolved is made yet.
+The owner subsequently reported sudden changes in brightness. The existing
+GDI paint cleared the displayed video area before every frame. The Windows
+client at `ceae5bfca3ff2bfbf59f79b766a3d306e16ee1da` composes each paint in a
+reused offscreen bitmap and presents the completed image in one pass. It also
+adds device-aspect resizing, Fit/F6, Rotate/F1 and compact controls. The
+[main Windows build](https://github.com/Justintunsday/iOSRemoteBridge/actions/runs/41288462720)
+passed repeated-color/resize rendering, portrait/landscape edge-and-corner
+sizing, GUI startup and the TLS/action regression checks.
+
+After this viewer was opened and the owner was asked to watch the live image
+for 20–30 seconds, the owner reported **"Brightness is stable now."** This is
+a supervised visual confirmation that the reported brightness flicker was
+resolved in that test, not an instrumented luminance or long-duration test.
+The viewer remained active with D3D11VA; one title sample showed 21.9 FPS,
+5.3 ms RTT and 7.7 ms last decode time. Those are instantaneous client samples,
+not sustained throughput or glass-to-glass measurements.
 
 Two additional short native Python telemetry windows were collected on this
 package, on the same Wi-Fi with Low Power Mode off and nominal thermal state:
@@ -132,8 +143,8 @@ cycle is outstanding. More throughput work and longer measurements are needed.
 
 ## Remaining validation
 
-Retest Windows input and reconnect with the follow-up package. Check
-cross-app capture, all rotations and edges, multi-touch, long press, text,
+Check longer Windows input/reconnect sessions, broader cross-app capture,
+all rotations and edges, multi-touch, long press, text,
 volume, app launch, STOP during input, Wi-Fi loss, respring/reboot recovery,
 sustained 30/60-FPS operation, protected content, memory growth and battery
 use. A standard MCP host has been tested against a TLS simulator; a physical
