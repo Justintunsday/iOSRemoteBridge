@@ -19,6 +19,10 @@ not silently copied from the build machine into this artifact.
    Arbitrary Unicode text is not implemented. Raw HID keys are exposed through
    the automation API and also require local confirmation.
 
+To open a paired viewer and start connecting immediately, use
+`iOSRemoteBridge.exe PATH_TO_CLIENT_CONFIG_JSON --connect`. Local iPhone approval
+is still required. Omit `--connect` to load the pairing path without connecting.
+
 Keyboard shortcuts: F1 rotates clockwise; F2 requests 30 FPS; F3 requests 60;
 F4 requests half resolution; F5 requests native resolution; Ctrl+T focuses the
 text field; Esc disconnects. Enter in the kbps field changes the bitrate.

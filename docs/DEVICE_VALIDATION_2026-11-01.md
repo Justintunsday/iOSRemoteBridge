@@ -88,6 +88,18 @@ path used by Windows. The Windows mouse/buttons still need an interactive
 retest of this package. Text, keyboard, multi-touch and volume are not implied
 to work by these observations.
 
+The next Windows retest exposed a separate client failure: each action reply
+closed the session and requested approval again. The observed window title was
+`[json.exception.type_error.302] type must be boolean, but is number`; the daemon
+logged `peer closed TLS stream` while SpringBoard and the daemon stayed running.
+The bridge's `@(!error)` expression boxed a C integer, so JSON emitted `ok: 1`
+instead of `ok: true`. The Windows callback requested a strict boolean and threw.
+The correction serializes explicit Foundation booleans and lets Windows accept
+the installed prototype's exact integer 0/1 form. A native TLS regression now
+exercises repeated Home/touch RPCs, an operation rejection, another RPC and
+decoded video after all actions on the same connection. Physical Windows
+verification of that client correction is pending.
+
 Two additional short native Python telemetry windows were collected on this
 package, on the same Wi-Fi with Low Power Mode off and nominal thermal state:
 

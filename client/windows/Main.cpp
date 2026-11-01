@@ -216,8 +216,11 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int show) {
                       GetDlgItem(hwnd,SendText)&&GetDlgItemInt(hwnd,Bitrate,nullptr,FALSE)==8000;
         LocalFree(argv); DestroyWindow(hwnd); WSACleanup(); return controls?0:1;
     }
+    bool autoConnect=argv&&argc>2&&std::wstring(argv[2])==L"--connect";
     if(argv&&argc>1) SetWindowTextW(configEdit,argv[1]); if(argv) LocalFree(argv);
-    ShowWindow(hwnd,show); MSG message;
+    ShowWindow(hwnd,show);
+    if(autoConnect) connectClient();
+    MSG message;
     while(GetMessageW(&message,nullptr,0,0)>0) {
         bool shortcut=message.message==WM_KEYDOWN&&(message.wParam==VK_ESCAPE||
                       (message.wParam>=VK_F1&&message.wParam<=VK_F5)||
