@@ -2,7 +2,7 @@ name: build-client
 on:
   push:
     branches: [main, 'feature/**', 'codex/**']
-    paths: ['client/**', 'shared/**', 'vcpkg.json', 'CMakeLists.txt', 'tools/native_smoke.py', 'tools/generate_color_fixtures.py', 'tools/prepare_ffmpeg_port.py', '.github/workflows/build-client.yml']
+    paths: ['client/**', 'shared/**', 'vcpkg.json', 'CMakeLists.txt', 'tools/native_smoke.py', 'tools/generate_color_fixtures.py', 'tools/fetch_fsr_runtime.py', 'tools/prepare_ffmpeg_port.py', '.github/workflows/build-client.yml']
   pull_request:
   workflow_dispatch:
 permissions:
@@ -48,6 +48,12 @@ jobs:
         run: |
           cmake --build build --config Release --parallel 2>&1 | Tee-Object build-logs/client-build.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/fetch_fsr_runtime.py build/client/windows/Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($amdDll in Get-ChildItem build/client/windows/Release/amd_fidelityfx_*.dll) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $amdDll.FullName
+            if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Advanced Micro Devices') { throw 'AMD runtime signature validation failed' }
+          }
           ctest --test-dir build -C Release --output-on-failure 2>&1 | Tee-Object build-logs/tests.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $ui = Start-Process -FilePath "$pwd/build/client/windows/Release/iOSRemoteBridge.exe" -ArgumentList '--self-test-ui' -WindowStyle Hidden -Wait -PassThru
@@ -75,6 +81,7 @@ jobs:
           Copy-Item build/client/windows/Release/iOSRemoteBridge.exe dist/windows/
           Copy-Item build/client/windows/Release/irb-color-check.exe dist/windows/
           Copy-Item build/client/windows/Release/irb-gpu-check.exe dist/windows/
+          Copy-Item build/client/windows/Release/irb-fsr-check.exe dist/windows/
           Copy-Item build/color-fixtures/*.h264 dist/windows/diagnostics/
           Copy-Item build/client/windows/Release/*.dll dist/windows/
           Copy-Item LICENSE,THIRD_PARTY_NOTICES.md dist/windows/licenses/

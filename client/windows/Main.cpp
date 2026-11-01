@@ -4,6 +4,7 @@
 #include "BufferedRenderer.h"
 #include "D3DRenderer.h"
 #include "HIDKeyMap.h"
+#include "ExperimentalFSR.h"
 #include <windowsx.h>
 #include <commdlg.h>
 #include <commctrl.h>
@@ -20,7 +21,7 @@ using json=nlohmann::json;
 namespace {
 constexpr UINT FrameMessage=WM_APP+1,StatusMessage=WM_APP+2,ResponseMessage=WM_APP+3,KeyboardModeMessage=WM_APP+4;
 constexpr UINT_PTR KeyboardTimer=1;
-constexpr int ExpandedToolbarHeight=250;
+constexpr int ExpandedToolbarHeight=280;
 constexpr UINT ToggleToolbarSystem=0x0100;
 HWND window,configEdit,textEdit,bitrateEdit,controlCheck,notice;
 HWND browseButton,connectButton,disconnectButton,homeButton,switcherButton,volumeUpButton,volumeDownButton;
@@ -28,8 +29,12 @@ HWND sendTextButton,bitrateLabel,rotateButton,fitButton,ratioCheck,sharpnessSlid
 HWND toggleToolbarButton;
 HWND videoWindow,vsyncCheck,fsrCheck;
 HWND keyboardCheck,shortcutHint;
+HWND experimentalCheck,experimentalHint;
 BufferedRenderer renderer;
 D3DRenderer gpuRenderer;
+ExperimentalFSR experimentalRenderer;
+VideoFrame experimentalFrame;
+bool experimentalEnabled=false;
 bool advancedFailed=false;
 std::unique_ptr<Connection> connection;
 std::mutex frameMutex,statusMutex;
@@ -53,16 +58,16 @@ int viewWidth=750,viewHeight=1334;
 RECT sizingStart{};
 double lastX=0,lastY=0;
 ULONGLONG lastMove=0;
-enum {Config=10,Browse,Connect,Disconnect,Home,Switcher,VolumeUp,VolumeDown,SendText,Bitrate,Rotate,Fit,KeepRatio,Sharpness,ToggleToolbar,VSync,FSR,KeyboardMode};
+enum {Config=10,Browse,Connect,Disconnect,Home,Switcher,VolumeUp,VolumeDown,SendText,Bitrate,Rotate,Fit,KeepRatio,Sharpness,ToggleToolbar,VSync,FSR,KeyboardMode,ExperimentalMode};
 int toolbarHeight() { return toolbarVisible?ExpandedToolbarHeight:0; }
 int minimumClientWidth() {
     int minimum=toolbarVisible?380:160;
     return keepRatio?std::max(minimum,static_cast<int>(std::ceil(120.0*viewWidth/viewHeight))):minimum;
 }
-std::array<HWND,24> toolbarControls() {
+std::array<HWND,26> toolbarControls() {
     return {configEdit,browseButton,connectButton,disconnectButton,controlCheck,homeButton,
             switcherButton,volumeUpButton,volumeDownButton,textEdit,sendTextButton,bitrateEdit,
-            bitrateLabel,rotateButton,fitButton,ratioCheck,sharpnessLabel,sharpnessSlider,notice,toggleToolbarButton,vsyncCheck,fsrCheck,keyboardCheck,shortcutHint};
+            bitrateLabel,rotateButton,fitButton,ratioCheck,sharpnessLabel,sharpnessSlider,notice,toggleToolbarButton,vsyncCheck,fsrCheck,keyboardCheck,shortcutHint,experimentalCheck,experimentalHint};
 }
 std::wstring wide(const std::string &text) {
     int size=MultiByteToWideChar(CP_UTF8,0,text.data(),static_cast<int>(text.size()),nullptr,0);
@@ -97,9 +102,10 @@ void layoutControls(int width) {
     place(textEdit,8,96,textWidth); place(sendTextButton,14+textWidth,96,70);
     place(bitrateEdit,90+textWidth,96,60); place(bitrateLabel,156+textWidth,100,40,20);
     place(ratioCheck,8,126,126); place(sharpnessLabel,140,130,78,20);
-    place(sharpnessSlider,218,123,width-226,28); place(notice,8,215,width-16,30);
+    place(sharpnessSlider,218,123,width-226,28); place(notice,8,245,width-16,30);
     place(vsyncCheck,8,155,90); place(fsrCheck,104,155,100);
     place(keyboardCheck,8,185,200); place(shortcutHint,214,189,width-222,20);
+    place(experimentalCheck,8,215,210); place(experimentalHint,224,219,width-232,20);
     place(toggleToolbarButton,width-134,155,126,26);
 }
 SIZE windowBorder(HWND hwnd) {
@@ -295,13 +301,29 @@ LRESULT CALLBACK videoProcedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         std::shared_ptr<const DisplayFrame> shown;
         { std::lock_guard<std::mutex> lock(frameMutex); shown=frame; }
         const VideoFrame empty; const VideoFrame &pixels=shown?shown->pixels:empty;
+        const VideoFrame *displayPixels=&pixels;
+        bool experimentalActive=false,experimentalAttempted=false;
+        if(experimentalEnabled&&pixels.width>0&&pixels.height>0) {
+            double scale=std::min(static_cast<double>(area.right)/pixels.width,static_cast<double>(area.bottom)/pixels.height);
+            int width=std::max(1,static_cast<int>(std::lround(pixels.width*scale)));
+            int height=std::max(1,static_cast<int>(std::lround(pixels.height*scale)));
+            if(width>pixels.width&&height>pixels.height) {
+                experimentalAttempted=true;
+                if(experimentalRenderer.process(pixels,width,height,experimentalFrame)) {
+                    displayPixels=&experimentalFrame; experimentalActive=true;
+                }
+            }
+        }
+        gpuRenderer.setFSR(!experimentalActive&&SendMessageW(fsrCheck,BM_GETCHECK,0,0)==BST_CHECKED);
         RECT image{};
-        bool painted=gpuRenderer.paint(hwnd,area.right,area.bottom,pixels,image);
+        bool painted=gpuRenderer.paint(hwnd,area.right,area.bottom,*displayPixels,image);
         if(painted&&connection&&connection->authorized()&&!keyboardPending) {
             bool sync=SendMessageW(vsyncCheck,BM_GETCHECK,0,0)==BST_CHECKED;
             bool fsr=SendMessageW(fsrCheck,BM_GETCHECK,0,0)==BST_CHECKED;
-            std::wstring display=wide(gpuRenderer.backend())+(sync?L" | VSync on":L" | VSync off")+
-                (gpuRenderer.fsrActive()?L" | FSR1 active":fsr?L" | FSR1 auto":L" | FSR1 off");
+            std::wstring scaling=experimentalActive?L" | FSR "+wide(experimentalRenderer.provider())+L" single-frame":
+                experimentalEnabled?(experimentalAttempted?L" | Experimental FSR unavailable":L" | Experimental FSR ready"):
+                gpuRenderer.fsrActive()?L" | FSR1 active":fsr?L" | FSR1 auto":L" | FSR1 off";
+            std::wstring display=wide(gpuRenderer.backend())+(sync?L" | VSync on":L" | VSync off")+scaling;
             if(display!=lastRenderNotice) { lastRenderNotice=display; SetWindowTextW(notice,display.c_str()); }
         }
         if(!painted) {
@@ -356,6 +378,8 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         fsrCheck=control(L"BUTTON",L"FSR 1",BS_AUTOCHECKBOX,0,0,100,24,FSR);
         keyboardCheck=control(L"BUTTON",L"Keyboard+mouse (F10)",BS_AUTOCHECKBOX,0,0,200,24,KeyboardMode);
         shortcutHint=control(L"STATIC",L"H Home / C Control",SS_NOPREFIX,0,0,160,20,0);
+        experimentalCheck=control(L"BUTTON",L"FSR 4/3/2.3 (exp.)",BS_AUTOCHECKBOX,0,0,210,24,ExperimentalMode);
+        experimentalHint=control(L"STATIC",L"Single-frame reset",SS_NOPREFIX,0,0,140,20,0);
         SendMessageW(vsyncCheck,BM_SETCHECK,BST_CHECKED,0);
         videoWindow=CreateWindowW(L"iOSRemoteBridge.Video",L"",WS_CHILD|WS_VISIBLE|WS_CLIPSIBLINGS,0,0,1,1,hwnd,nullptr,GetModuleHandleW(nullptr),nullptr);
         AppendMenuW(GetSystemMenu(hwnd,FALSE),MF_SEPARATOR,0,nullptr);
@@ -380,6 +404,9 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         case Fit: fitWindow(); return 0;
         case ToggleToolbar: setToolbarVisible(!toolbarVisible); return 0;
         case KeyboardMode: toggleKeyboardMode(); return 0;
+        case ExperimentalMode:
+            experimentalEnabled=SendMessageW(experimentalCheck,BM_GETCHECK,0,0)==BST_CHECKED;
+            experimentalRenderer.reset(); lastRenderNotice.clear(); InvalidateRect(videoWindow,nullptr,FALSE); return 0;
         case VSync:
             gpuRenderer.setVSync(SendMessageW(vsyncCheck,BM_GETCHECK,0,0)==BST_CHECKED);
             InvalidateRect(videoWindow,nullptr,FALSE); return 0;
@@ -533,7 +560,7 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         EndPaint(hwnd,&paint); return 0;
     }
     case WM_CLOSE: disconnect(); DestroyWindow(hwnd); return 0;
-    case WM_DESTROY: gpuRenderer.reset(); renderer.reset(); PostQuitMessage(0); return 0;
+    case WM_DESTROY: experimentalRenderer.reset(); gpuRenderer.reset(); renderer.reset(); PostQuitMessage(0); return 0;
     }
     return DefWindowProcW(hwnd,message,w,l);
 }
