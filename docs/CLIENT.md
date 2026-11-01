@@ -23,6 +23,10 @@ To open a paired viewer and start connecting immediately, use
 `iOSRemoteBridge.exe PATH_TO_CLIENT_CONFIG_JSON --connect`. Local iPhone approval
 is still required. Omit `--connect` to load the pairing path without connecting.
 
+The interactive viewer requests 60 FPS and a three-frame window by default.
+The capture/encode/network path still determines the achieved decoded FPS;
+selecting 60 does not establish that 60 frames were captured or displayed.
+
 Keyboard shortcuts: F1 rotates clockwise; F2 requests 30 FPS; F3 requests 60;
 F4 requests half resolution; F5 requests native resolution; F6 fits the window
 to the device screen on the current monitor; Ctrl+T focuses the
@@ -45,6 +49,13 @@ pixels to system memory for GDI presentation. Each paint is composed in a reused
 offscreen bitmap and copied to the window in one pass; background erasure does
 not clear the displayed image between frames. This is not a zero-copy GPU renderer.
 The title reports software if GPU decoding was unavailable or reset.
+
+GPU download retains the decoded frame's color properties. Full-range and
+limited-range video use the corresponding conversion into full-range BGRA,
+with the signaled YCbCr matrix. This corrects highlight clipping caused by
+interpreting full-range phone video as limited-range NV12. The diagnostic
+`irb-color-check.exe diagnostics/gray-full.h264 diagnostics/gray-limited.h264`
+checks both ranges using software and the available hardware decoder.
 
 Rotation is explicitly selected by the viewer. Input maps through the inverse
 rotation and letterboxing into the natural portrait digitizer plane. Automatic

@@ -31,7 +31,7 @@ void ColorConverter::convert(const AVFrame &source,VideoFrame &output) {
     }
     bool changed=width_!=source.width||height_!=source.height||format_!=source.format;
     context_=sws_getCachedContext(context_,source.width,source.height,format,
-              source.width,source.height,AV_PIX_FMT_BGRA,SWS_FAST_BILINEAR,nullptr,nullptr,nullptr);
+              source.width,source.height,AV_PIX_FMT_BGRA,SWS_BILINEAR|SWS_ACCURATE_RND|SWS_FULL_CHR_H_INT,nullptr,nullptr,nullptr);
     if(!context_) throw std::runtime_error("pixel conversion unavailable");
     if(changed||range_!=full||matrix_!=matrix) {
         const int *coefficients=sws_getCoefficients(matrix);

@@ -195,3 +195,21 @@ The listener was later absent with launchctl reporting an idle-exit jetsam.
 The package now requests unconditional KeepAlive rather than restart only on
 unsuccessful exit. This follows [Apple's launchd service guidance](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html).
 Memory-pressure recovery and idle power still require device observation.
+
+## Full-range decode correction and bounded pipelining
+
+The recorded phone H.264 stream decodes as yuvj420p / full range, with its matrix
+unspecified. FFmpeg's [hardware transfer implementation](https://github.com/FFmpeg/FFmpeg/blob/n9.0.2/libavutil/hwcontext.c)
+copies pixel storage without carrying AVFrame color properties. The previous
+Windows path downloaded to NV12 and applied the scaler's default range. It now
+copies those properties and configures source range and matrix explicitly using
+[libswscale's colorspace controls](https://github.com/FFmpeg/FFmpeg/blob/n9.0.2/libswscale/swscale.h).
+Accurate rounding/full chroma interpolation also avoids the measured level bias
+in the former fast conversion. Known grayscale ramps exercise near-black and
+near-white values; hardware/software comparisons can use a private device frame.
+
+The one-frame capture/encode/transfer/decode/ack dependency limited measured
+throughput. The revised protocol negotiates at most three ordered frame credits,
+overlaps at most two encoder submissions, and drains before reconfiguration.
+This keeps the window bounded while allowing stages to overlap. It is a source
+change requiring new physical FPS/latency measurements, not proof of 60 FPS.

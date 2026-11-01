@@ -44,15 +44,27 @@ newer hardware-requirement specification is unavailable, so unknown remains
 unverified rather than being called hardware-confirmed. Every IDR includes SPS
 and PPS. CMTime conversion preserves fractional microseconds.
 
-One video frame is allowed in flight from capture to client acknowledgment.
-Capture skips a tick before encoding while credit is exhausted; encoded
-dependent frames are not silently discarded. The native client acknowledges
-after decoding and handing pixels to the renderer, not after monitor scanout.
-The Python client acknowledges after consuming the encoded frame. Credit never
-allows multiple queued encoded frames. TCP handles packet loss by retransmission;
+The authenticated client negotiates a bounded window of one to three video
+frames; a missing/invalid option selects the legacy one-frame behavior. Current
+clients request three slots and the Windows viewer requests 60 FPS by default.
+At most two VideoToolbox submissions overlap. Capture skips a tick before
+encoding when the window is full; encoded dependent frames are not discarded.
+Frame credits acknowledge exact timestamps in FIFO order. Quality changes pause
+capture and drain all slots before recreating the pipeline. The capture pool
+allows four allocations to cover the two submissions, a retained snapshot and
+the next capture target. The native client acknowledges after decoding and
+handing pixels to the renderer, not after monitor scanout. The Python client
+acknowledges after consuming the encoded frame. TCP handles loss by retransmission;
 it can introduce head-of-line delay. A five-second frame acknowledgment timeout
 ends stalled sessions. Local IPC writers are bounded and never wait on the
 SpringBoard main thread.
+
+GPU-to-CPU frame transfer preserves AVFrame properties explicitly. BGRA conversion
+uses the frame's full/limited range and YCbCr matrix, with accurate rounding and
+full horizontal chroma interpolation. Untagged legacy video retains FFmpeg's
+BT.601 matrix default. Source range is never inferred solely from the downloaded
+NV12 pixel format. Encoded grayscale ramps test black and near-white detail;
+this SDR path does not implement HDR tone mapping or monitor-profile calibration.
 
 The daemon uses capture-to-client-ack time measured entirely on the iPhone for
 a conservative bitrate controller. It samples an EWMA and adjusts no more often

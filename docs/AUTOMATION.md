@@ -19,6 +19,10 @@ Coordinates use the natural portrait plane, each in [0,1]. The GUI transforms
 its rotated view back to this plane. Public request IDs are positive integers.
 The authenticated daemon validates all fields, then the bridge validates again.
 
+`BridgeClient(..., video_window=1/2/3)` selects the maximum number of frames in
+flight for benchmarking; the default is 3. An older server ignores this optional
+AUTH field and retains its one-frame behavior. Credits remain ordered per frame.
+
 | Operation | Parameters / result |
 | --- | --- |
 | get_device_info | model, OS, dimensions, requested FPS, input/hardware status |
@@ -32,7 +36,7 @@ The authenticated daemon validates all fields, then the bridge validates again.
 | touch | finger (0..9), phase (0 down / 1 move / 2 up), x, y |
 | type_text | text, maximum 1024 US-layout ASCII characters; separate local approval |
 | key | usage (USB keyboard page 0x07, 4..231); one press/release; separate local approval |
-| press_home / app_switcher | no parameters; App Switcher uses double Home on the SE2 |
+| press_home / app_switcher | no parameters; guarded SpringBoard navigation handlers |
 | volume_up / volume_down | no parameters; device delivery needs verification |
 | launch_app | bundle_id; dynamic workspace API; separate local approval |
 | configure | bitrate (500000..20000000); optional fps (30/60) and scale (.25..1) together |
