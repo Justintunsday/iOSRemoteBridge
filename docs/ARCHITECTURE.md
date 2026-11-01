@@ -73,7 +73,9 @@ The native client uses Win32, OpenSSL and dynamically linked FFmpeg. D3D11VA is
 selected when offered; decode failure resets to software and requests an IDR.
 Pixels are copied back to BGRA and presented with GDI. This avoids a heavyweight
 UI runtime but leaves a CPU/rendering optimization opportunity. The Python
-adapter uses only the standard library and supports persistent JSON-lines RPC.
+API uses only the standard library and supports persistent JSON-lines RPC. The
+optional standard MCP adapter uses the pinned official Python SDK and exposes
+screen-image and authorized-input tools over stdio, without a local network port.
 The implementation has no required Mac after package installation and pairing.
 
 Modules are separated under ios/capture, encoder, input, common and daemon;

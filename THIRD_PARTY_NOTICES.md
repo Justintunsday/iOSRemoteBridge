@@ -31,6 +31,7 @@ logs for exact versions and build flags. Rebuild with that vcpkg commit and
 - nlohmann/json: https://github.com/nlohmann/json (MIT)
 - vcpkg ports/patches: https://github.com/microsoft/vcpkg/tree/9a5dfef5d1a0438a7d24856a85bd60f309d355e9/ports
 - Theos: https://github.com/theos/theos (build tooling, not redistributed)
+- Optional MCP Python SDK: https://github.com/modelcontextprotocol/python-sdk/tree/v2.3.0 (MIT; installed separately through pip)
 
 The FFmpeg command installed by Chocolatey in CI only generates a test fixture.
 It is not copied into the Windows client artifact or linked to this application.

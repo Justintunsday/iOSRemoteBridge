@@ -3,6 +3,10 @@
 Download `windows-client-x64` from a successful build-client Actions run and
 extract the entire ZIP. Keep the DLLs and licenses alongside iOSRemoteBridge.exe.
 The source artifact in the same run contains the corresponding FFmpeg sources.
+Windows also needs Microsoft's x64 Visual C++ v14 runtime. If it is missing,
+install the [current supported redistributable from Microsoft](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist).
+The build uses the dynamic runtime; proprietary redistributable binaries are
+not silently copied from the build machine into this artifact.
 
 1. Generate pairing files with `python tools/provision.py --host IPHONE_WIFI_IP`.
 2. Follow DEVICE_TESTING.md to provision the iPhone over SSH and start the daemon.
