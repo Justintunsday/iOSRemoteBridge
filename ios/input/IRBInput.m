@@ -108,7 +108,7 @@ static uint16_t asciiKey(unichar c,BOOL *shift) {
     *shift=NO;
     if(c>='a'&&c<='z') return 4+c-'a';
     if(c>='A'&&c<='Z') { *shift=YES; return 4+c-'A'; }
-    if(c>='1'&&c<='9') return 0x1e+c-'1';
+    if(c>='1'&&c<='9') return 0x1e + c - '1';
     if(c=='0') return 0x27;
     if(c=='\n'||c=='\r') return 0x28;
     if(c=='\t') return 0x2b;
@@ -122,7 +122,7 @@ static uint16_t asciiKey(unichar c,BOOL *shift) {
         if(c==[shifted characterAtIndex:i]) { *shift=YES; return codes[i]; }
     }
     NSString *digits=@"!@#$%^&*()";
-    for(NSUInteger i=0;i<digits.length;++i) if(c==[digits characterAtIndex:i]) { *shift=YES; return i==9?0x27:(uint16_t)(0x1e+i); }
+    for(NSUInteger i=0;i<digits.length;++i) if(c==[digits characterAtIndex:i]) { *shift=YES; return i==9?0x27:(uint16_t)(0x1e + i); }
     return 0;
 }
 - (BOOL)typeASCII:(NSString *)text {

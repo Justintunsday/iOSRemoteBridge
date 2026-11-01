@@ -1,6 +1,6 @@
 // Capture approach informed by ScreenMirror (MIT), see THIRD_PARTY_NOTICES.md.
 #import "IRBCapture.h"
-#import <IOSurface/IOSurface.h>
+#import <IOSurface/IOSurfaceRef.h>
 #import <dlfcn.h>
 #import <mach/mach.h>
 typedef kern_return_t (*RenderDisplay)(mach_port_t,CFStringRef,IOSurfaceRef,int,int);

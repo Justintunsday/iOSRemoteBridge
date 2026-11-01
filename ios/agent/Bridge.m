@@ -179,8 +179,8 @@
     if(h.type==IRB_START) {
         if(_approved||_confirming) return;
         NSDictionary *options=IRBDictionary(data);
-        _fps=[options[@"fps"] intValue]==60?60:30;
-        _bitrate=8000000; _scale=1; _control=[options[@"control"] boolValue];
+        _fps=[IRBNumber(options[@"fps"]) intValue]==60?60:30;
+        _bitrate=8000000; _scale=1; _control=[IRBNumber(options[@"control"]) boolValue];
         uint64_t generation=++_generation;
         NSString *message=_control?@"An authenticated remote requests screen viewing and system-wide input for 15 minutes. Supervise sensitive screens. Text, keyboard and app launches ask again locally. Tap the red STOP control to disconnect.":@"An authenticated remote requests screen viewing for 15 minutes. Tap the red STOP control to disconnect.";
         [self prompt:message decision:^(BOOL allowed) {
@@ -215,10 +215,10 @@
              @"width":@(_capture.width),@"height":@(_capture.height),@"orientation":@"natural_portrait"} error:nil]; return;
     }
     if([op isEqual:@"configure"]) {
-        int rate=[r[@"bitrate"] intValue];
+        int rate=[IRBNumber(r[@"bitrate"]) intValue];
         if(rate<500000||rate>20000000) { [self reply:r result:nil error:@"bitrate must be 500000..20000000"]; return; }
         if(r[@"fps"]||r[@"scale"]) {
-            int fps=[r[@"fps"] intValue]; double scale=[r[@"scale"] doubleValue];
+            int fps=[IRBNumber(r[@"fps"]) intValue]; double scale=IRBReal(r[@"scale"]);
             if((fps!=30&&fps!=60)||!isfinite(scale)||scale<.25||scale>1) { [self reply:r result:nil error:@"fps 30/60 and scale .25..1 required"]; return; }
             if(_encoding||!_credit) { [self reply:r result:nil error:@"frame outstanding; retry after next frame ACK"]; return; }
             [_display invalidate]; _display=nil; [_encoder stop];
@@ -228,6 +228,7 @@
         } else if(![_encoder setBitrate:rate]) { [self reply:r result:nil error:_encoder.error]; return; }
         _bitrate=rate; [self reply:r result:[self info] error:nil]; return;
     }
+    if([op isEqual:@"request_keyframe"]) { _forceKey=YES; [self reply:r result:@{} error:nil]; return; }
     if(!_control||_confirming||_gesture||[self locked]) { [self reply:r result:nil error:@"input disabled, confirmation pending, locked, or gesture busy"]; return; }
     if([op isEqual:@"type_text"]||[op isEqual:@"key"]||[op isEqual:@"launch_app"]) {
         uint64_t generation=_generation;
@@ -240,7 +241,7 @@
 }
 - (void)execute:(NSDictionary *)r {
     NSString *op=r[@"op"]; BOOL ok=NO;
-    double x=[r[@"x"] doubleValue],y=[r[@"y"] doubleValue];
+    double x=IRBReal(r[@"x"]),y=IRBReal(r[@"y"]);
     if([op isEqual:@"touch"]) {
         if(![r[@"finger"] isKindOfClass:NSNumber.class]||![r[@"phase"] isKindOfClass:NSNumber.class]||
            ![r[@"x"] isKindOfClass:NSNumber.class]||![r[@"y"] isKindOfClass:NSNumber.class]) { [self reply:r result:nil error:@"touch requires finger, phase, x, y numbers"]; return; }
@@ -272,9 +273,9 @@
 }
 - (void)gesture:(NSDictionary *)r {
     NSString *op=r[@"op"]; BOOL swipe=[op isEqual:@"swipe"],twice=[op isEqual:@"double_tap"];
-    double x=[r[@"x"] doubleValue],y=[r[@"y"] doubleValue];
-    double x2=swipe?[r[@"to_x"] doubleValue]:x,y2=swipe?[r[@"to_y"] doubleValue]:y;
-    double duration=([op isEqual:@"long_press"]||swipe)?[r[@"duration_ms"] doubleValue]/1000.:.06;
+    double x=IRBReal(r[@"x"]),y=IRBReal(r[@"y"]);
+    double x2=swipe?IRBReal(r[@"to_x"]):x,y2=swipe?IRBReal(r[@"to_y"]):y;
+    double duration=([op isEqual:@"long_press"]||swipe)?IRBReal(r[@"duration_ms"])/1000.:.06;
     double unusedX,unusedY;
     if(![r[@"x"] isKindOfClass:NSNumber.class]||![r[@"y"] isKindOfClass:NSNumber.class]||
        (swipe&&(![r[@"to_x"] isKindOfClass:NSNumber.class]||![r[@"to_y"] isKindOfClass:NSNumber.class]))||
