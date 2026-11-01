@@ -1,0 +1,86 @@
+name: build-ios-controller
+on:
+  push:
+    branches: [main, 'feature/**', 'codex/**']
+    paths: ['client/ios/**', 'shared/irb_protocol.h', 'tools/ios_controller*', 'docs/IOS_CLIENT.md', '.github/workflows/build-ios-controller.yml']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  controller:
+    runs-on: macos-15
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Generate native icon and test production Objective-C modules
+        run: |
+          set -euo pipefail
+          mkdir -p build-logs build/controller-tools
+          xcodebuild -version | tee build-logs/controller-xcode.txt
+          mac_sdk="$(xcrun --sdk macosx --show-sdk-path)"
+          xcrun --sdk macosx clang -isysroot "$mac_sdk" -fobjc-arc -framework AppKit tools/ios_controller_icon.m -o build/controller-tools/create-icon
+          build/controller-tools/create-icon client/ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+          xcrun --sdk macosx clang -isysroot "$mac_sdk" -fobjc-arc -Wall -Wextra -Werror -Wno-deprecated-declarations \
+            -framework Foundation -framework Security -framework VideoToolbox -framework CoreMedia -framework CoreVideo \
+            client/ios/Tests/foundation_tests.m client/ios/RemoteBridge/IRBProtocol.m client/ios/RemoteBridge/IRBProfile.m client/ios/RemoteBridge/IRBVideoDecoder.m \
+            -o build/controller-tools/foundation-tests
+          build/controller-tools/foundation-tests | tee build-logs/controller-foundation-tests.txt
+      - name: Build arm64 iPhone and iPad app
+        run: |
+          set -euo pipefail
+          cmake -S client/ios -B build/controller-device -G Xcode -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphoneos -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
+          xcodebuild -project build/controller-device/IRBController.xcodeproj -scheme iOSRemoteBridge -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build 2>&1 | tee build-logs/controller-device-build.txt
+      - name: Package IPA for AltStore and Sideloadly re-signing
+        run: |
+          set -euo pipefail
+          mkdir -p dist/ios-controller/Payload
+          app_path="$(find build/controller-device -type d -name iOSRemoteBridge.app | head -n 1)"
+          test -n "$app_path"
+          cp -R "$app_path" dist/ios-controller/Payload/
+          codesign --force --sign - --timestamp=none dist/ios-controller/Payload/iOSRemoteBridge.app
+          codesign --verify --deep --strict dist/ios-controller/Payload/iOSRemoteBridge.app
+          lipo -info dist/ios-controller/Payload/iOSRemoteBridge.app/iOSRemoteBridge | tee build-logs/controller-architectures.txt
+          python3 tools/ios_controller_package.py
+      - name: Build and boot iOS simulator
+        run: |
+          set -euo pipefail
+          xcrun simctl list devices available -j > build-logs/controller-simulators.json
+          simulator_id="$(python3 -c 'import json; d=json.load(open("build-logs/controller-simulators.json")); print(next(v["udid"] for k,vs in d["devices"].items() if "iOS" in k for v in vs if "iPhone" in v["name"]))')"
+          echo "CONTROLLER_SIMULATOR=$simulator_id" >> "$GITHUB_ENV"
+          xcrun simctl boot "$simulator_id"
+          xcrun simctl bootstatus "$simulator_id" -b
+          cmake -S client/ios -B build/controller-simulator -G Xcode -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
+          xcodebuild -project build/controller-simulator/IRBController.xcodeproj -scheme iOSRemoteBridge -configuration Debug \
+            -sdk iphonesimulator -destination "id=$simulator_id" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build 2>&1 | tee build-logs/controller-simulator-build.txt
+      - name: Test real iOS TLS, H.264 decode, rendering and touch protocol
+        run: |
+          set -euo pipefail
+          python3 tools/ios_controller_smoke.py "$CONTROLLER_SIMULATOR" 2>&1 | tee build-logs/controller-simulator-tests.txt
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: ios-controller-unsigned-ipa
+          path: |
+            dist/ios-controller/iOSRemoteBridge-Controller-unsigned.ipa
+            dist/ios-controller/INSTALL.md
+            dist/ios-controller/BUILD.txt
+            dist/ios-controller/SHA256SUMS.txt
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-controller-build-logs
+          path: build-logs/
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: ios-controller-generated-icon
+          path: client/ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png
