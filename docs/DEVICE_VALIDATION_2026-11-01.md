@@ -209,7 +209,7 @@ being presented as sustained 60-FPS evidence.
 
 Check longer Windows input/reconnect sessions, broader cross-app capture,
 all rotations and edges, multi-touch, long press, text,
-volume, app launch, STOP during input, Wi-Fi loss, respring/reboot recovery,
+volume, app launch, disconnect/lock during input, Wi-Fi loss, respring/reboot recovery,
 sustained 30/60-FPS operation, protected content, memory growth and battery
 use. A standard MCP host has been tested against a TLS simulator; a physical
 MCP-host-to-phone session remains untested. Use DEVICE_TESTING.md for the exact

@@ -32,8 +32,9 @@ physical approval on the unlocked iPhone. It is not an unattended-access server.
   lengths before allocating a payload. Video caps at 8 MiB, control at 64 KiB,
   responses at 2 MiB. Both daemon and bridge validate operation schemas, numeric
   types/ranges and field names. Outgoing queues and command rate are bounded.
-- Only one network session is accepted. Capture starts after local approval,
-  has a visible STOP control and expires after 15 minutes. Lock detection is
+- Only one network session is accepted. Capture starts after local approval
+  and expires after 15 minutes. There is no persistent on-device session overlay.
+  The owner can lock the iPhone or disconnect the client to stop it. Lock detection is
   dynamically checked and fails closed if the private selector is missing.
   Respring and daemon/bridge loss invalidate the session. The client discards
   queued input before reconnecting; it never retries an ambiguous gesture.

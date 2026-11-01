@@ -88,6 +88,6 @@ physical integration has been claimed. SDK API usage follows the
 [official v2 SDK](https://github.com/modelcontextprotocol/python-sdk/tree/v2.3.0).
 
 All screen/input operations remain experimental on the target until physical
-testing is recorded. Owner consent, the active indicator and STOP control apply
+testing is recorded. Owner consent, lock shutdown and the session deadline apply
 equally to human clients and AI agents. A tool's `submitted`/`completed` state
 describes injection scheduling, not proof that a UI action had the desired effect.

@@ -11,8 +11,9 @@ not silently copied from the build machine into this artifact.
 1. Generate pairing files with `python tools/provision.py --host IPHONE_WIFI_IP`.
 2. Follow DEVICE_TESTING.md to provision the iPhone over SSH and start the daemon.
 3. Open iOSRemoteBridge.exe, choose client-config.json, then Connect.
-4. Approve the request physically on the unlocked iPhone. The red STOP control
-   stays visible on the iPhone during the session. Every reconnect asks again.
+4. Approve the request physically on the unlocked iPhone. No floating control
+   button covers the screen. Lock the phone, click Disconnect or press Esc
+   to end the session. Every reconnect asks again.
 5. Drag with the mouse for touch input. Two clicks produce a double tap. Hold
    the mouse button for a long press. Home, App switcher and volume have buttons.
 6. Use Send text for US-layout ASCII text; the iPhone asks for separate approval.

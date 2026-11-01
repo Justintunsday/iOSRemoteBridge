@@ -8,7 +8,7 @@ flowchart LR
   C --> V[VideoToolbox H.264]
   V --> D
   S --> H[IOHID system input]
-  S --> O[Physical approval and red STOP control]
+  S --> O[Physical approval, lock and session expiry]
 ```
 
 The daemon owns the network listener, authentication, framing, rate limits and
@@ -21,9 +21,9 @@ Untrusted network/crypto handling is already outside SpringBoard.
 
 After pinned TLS, the client sends its random 256-bit token and requests viewing
 or control. The daemon forwards a consent request to SpringBoard. No video or
-input is available until the owner taps Allow physically. A persistent red STOP
-control appears on the iPhone; it immediately ends the session. Lock, expiry,
-disconnect, respring, timeout or repeated pipeline errors also stop it. Sensitive
+input is available until the owner taps Allow physically. The approval window
+is released afterward; no floating control button covers the phone screen.
+Lock, expiry, disconnect, respring, timeout or repeated pipeline errors stop it. Sensitive
 text, a HID key press and application launches need another local confirmation;
 remote input is disabled while that confirmation is displayed.
 

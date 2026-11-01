@@ -25,7 +25,6 @@
     IRBInput *_input;
     CADisplayLink *_display;
     UIWindow *_window,*_previousWindow;
-    UIButton *_stopButton;
     CIContext *_ci;
     CVPixelBufferRef _lastFrame;
     BOOL _connecting,_approved,_control,_confirming,_forceKey;
@@ -109,8 +108,8 @@
         if(generation!=self->_generation) return;
         self->_confirming=NO; [self->_previousWindow makeKeyWindow];
         [self status:allow?@"owner_allowed":@"owner_declined_or_timed_out" extra:@{}];
-        self->_window.hidden=YES; decision(allow);
-        if(self->_approved) [self showIndicator];
+        self->_window.hidden=YES; self->_window=nil; self->_previousWindow=nil;
+        decision(allow);
     };
     [alert addAction:[UIAlertAction actionWithTitle:@"Reject" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a) { (void)a; finish(NO); }]];
     [alert addAction:[UIAlertAction actionWithTitle:@"Allow" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) { (void)a; finish(YES); }]];
@@ -128,19 +127,6 @@
         }
     });
 }
-- (void)showIndicator {
-    _window.hidden=YES;
-    _window.frame=CGRectMake(8,48,204,42); _window.rootViewController=[UIViewController new];
-    _window.rootViewController.view.backgroundColor=UIColor.clearColor;
-    _stopButton=[UIButton buttonWithType:UIButtonTypeSystem]; _stopButton.frame=_window.bounds;
-    _stopButton.backgroundColor=[UIColor colorWithRed:.8 green:0 blue:0 alpha:.95];
-    [_stopButton setTitle:_control?@"REMOTE CONTROL · STOP":@"SCREEN SHARING · STOP" forState:UIControlStateNormal];
-    [_stopButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-    _stopButton.titleLabel.font=[UIFont boldSystemFontOfSize:12]; _stopButton.layer.cornerRadius=8;
-    [_stopButton addTarget:self action:@selector(ownerStop) forControlEvents:UIControlEventTouchUpInside];
-    [_window.rootViewController.view addSubview:_stopButton]; _window.hidden=NO;
-}
-- (void)ownerStop { [self stopSession:@"stopped by device owner"]; }
 - (void)stopSession:(NSString *)reason {
     BOOL was=_approved||_confirming;
     [self status:@"stopped" extra:@{@"reason":reason}];
@@ -246,13 +232,13 @@
         _windowLimit=requested>=1&&requested<=IRB_MAX_VIDEO_WINDOW?requested:1;
         _bitrate=8000000; _scale=1; _control=[IRBNumber(options[@"control"]) boolValue];
         uint64_t generation=++_generation;
-        NSString *message=_control?@"An authenticated remote requests screen viewing and system-wide input for 15 minutes. Supervise sensitive screens. Text, keyboard and app launches ask again locally. Tap the red STOP control to disconnect.":@"An authenticated remote requests screen viewing for 15 minutes. Tap the red STOP control to disconnect.";
+        NSString *message=_control?@"An authenticated remote requests screen viewing and system-wide input for 15 minutes. Supervise sensitive screens. Text, keyboard and app launches ask again locally. Lock the iPhone or disconnect the client to end the session.":@"An authenticated remote requests screen viewing for 15 minutes. Lock the iPhone or disconnect the client to end the session.";
         [self prompt:message decision:^(BOOL allowed) {
             if(generation!=self->_generation) return;
             if(!allowed) { [self->_peer send:IRB_STOP flags:0 pts:0 data:IRBJSON(@{@"reason":@"owner declined"})]; return; }
             self->_approved=YES; self->_deadline=IRBNow()+900000000ULL;
             if(![self startPipeline]) { [self stopSession:@"pipeline failed"]; return; }
-            [self showIndicator]; [self send:@{@"event":@"authorized",@"device":[self info]}];
+            [self send:@{@"event":@"authorized",@"device":[self info]}];
         }];
         return;
     }

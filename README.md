@@ -22,8 +22,8 @@ The owner confirmed corrected colors and smoother motion; see the report's limit
 - Rootless .deb containing a mobile LaunchDaemon and a SpringBoard-only library.
 - Bounded IOSurface-backed capture, native rendering/GPU scaling requests,
   VideoToolbox H.264, IDR recovery, 30/60-FPS pacing and bitrate adaptation.
-- Pinned TLS, random pairing tokens, physical owner approval, active-session
-  STOP control, lock/expiry shutdown and extra confirmation for sensitive input.
+- Pinned TLS, random pairing tokens, physical owner approval, lock/expiry shutdown
+  and extra confirmation for sensitive input. No floating control overlay.
 - System-HID multi-contact API, gestures, paced US-layout ASCII text, keyboard
   presses, Home/App Switcher, volume and experimental app launch.
 - Native Win32 receiver with D3D11VA selection/software fallback, mouse/text
@@ -50,7 +50,8 @@ future work. ScreenCaptureKit is unavailable on iOS 16.1.1.
 3. Extract the entire Windows artifact, launch iOSRemoteBridge.exe, select the
    local pairing JSON, connect and approve physically on the unlocked iPhone.
 4. For automation follow [AUTOMATION.md](docs/AUTOMATION.md). Viewing is the
-   default; input needs `--control` plus local approval. Tap STOP to revoke it.
+   default; input needs `--control` plus local approval. Lock the iPhone or
+   disconnect the client to end the session.
 
 Pairing files stay local. No Mac must remain connected after installation.
 A normal reboot requires jailbreak reactivation. Sleep/lock ends the session;
