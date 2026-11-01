@@ -44,6 +44,7 @@ void Connection::run() {
         try { session(); }
         catch(const std::exception &e) { if(onStatus) onStatus(e.what()); }
         authorized_=false;
+        if(onAuthorization) onAuthorization(false);
         { std::lock_guard<std::mutex> lock(queueMutex_); commands_.clear(); }
         { std::lock_guard<std::mutex> lock(socketMutex_); if(socket_!=INVALID_SOCKET) closesocket(socket_); socket_=INVALID_SOCKET; }
         if(stop_) break;
@@ -145,7 +146,7 @@ void Connection::session() {
             if(header.type==IRB_PONG) rtt=(nowUS()-header.pts_us)/1000.0;
             else if(header.type==IRB_RESPONSE) {
                 auto reply=json::parse(payload,payload+header.length);
-                if(reply.value("event",std::string())=="authorized") { authorized_=true; if(onStatus) onStatus("Approved - streaming"); }
+                if(reply.value("event",std::string())=="authorized") { authorized_=true; if(onAuthorization) onAuthorization(true); if(onStatus) onStatus("Approved - streaming"); }
                 if(onResponse) onResponse(reply);
             } else if(authorized_) {
                 auto before=nowUS();

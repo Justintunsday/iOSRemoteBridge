@@ -28,8 +28,8 @@
     CIContext *_ci;
     CVPixelBufferRef _lastFrame;
     BOOL _connecting,_approved,_control,_confirming,_forceKey;
-    BOOL _snapshotPending;
-    uint64_t _deadline,_generation,_frames,_skipped,_started,_lastVideoPTS;
+    BOOL _snapshotPending,_keyboardEnabled;
+    uint64_t _deadline,_generation,_keyboardGeneration,_frames,_skipped,_started,_lastVideoPTS;
     irb_frame_window _videoWindow;
     unsigned _windowLimit;
     NSMutableSet<NSNumber *> *_encodingPTS;
@@ -130,7 +130,7 @@
 - (void)stopSession:(NSString *)reason {
     BOOL was=_approved||_confirming;
     [self status:@"stopped" extra:@{@"reason":reason}];
-    _approved=NO; _confirming=NO; ++_generation;
+    _approved=NO; _confirming=NO; _keyboardEnabled=NO; ++_generation; ++_keyboardGeneration;
     [_display invalidate]; _display=nil;
     if(_gesture) { dispatch_source_cancel(_gesture); _gesture=nil; }
     [_input releaseAll]; [_encoder stop]; _encoder=nil; _capture=nil;
@@ -282,7 +282,27 @@
         _bitrate=rate; [self reply:r result:[self info] error:nil]; return;
     }
     if([op isEqual:@"request_keyframe"]) { _forceKey=YES; [self reply:r result:@{} error:nil]; return; }
+    if([op isEqual:@"keyboard_mode"]&&![r[@"enabled"] boolValue]) {
+        ++_keyboardGeneration; _keyboardEnabled=NO; [_input releaseKeys];
+        [self reply:r result:@{@"keyboard_enabled":@NO} error:nil]; return;
+    }
+    if([op isEqual:@"key_event"]) {
+        if(!_control||_confirming||[self locked]||!_keyboardEnabled) {
+            [self reply:r result:nil error:@"live keyboard mode needs separate local approval and an unlocked phone"]; return;
+        }
+        BOOL ok=[_input key:[r[@"usage"] unsignedShortValue] down:[r[@"down"] boolValue]];
+        [self reply:r result:@{@"state":@"submitted"} error:ok?nil:@"keyboard HID unavailable"]; return;
+    }
     if(!_control||_confirming||_gesture||[self locked]) { [self reply:r result:nil error:@"input disabled, confirmation pending, locked, or gesture busy"]; return; }
+    if([op isEqual:@"keyboard_mode"]) {
+        if(_keyboardEnabled) { [self reply:r result:@{@"keyboard_enabled":@YES} error:nil]; return; }
+        uint64_t generation=_generation,keyboardGeneration=++_keyboardGeneration;
+        [self prompt:@"Allow live hardware-keyboard input for this approved session? While enabled, individual key presses will not ask again. Lock the iPhone, disconnect, or turn off Keyboard+mouse to revoke this mode." decision:^(BOOL allow) {
+            if(generation!=self->_generation) return;
+            self->_keyboardEnabled=allow&&keyboardGeneration==self->_keyboardGeneration;
+            [self reply:r result:@{@"keyboard_enabled":IRBBool(self->_keyboardEnabled)} error:nil];
+        }]; return;
+    }
     if([op isEqual:@"type_text"]||[op isEqual:@"key"]||[op isEqual:@"launch_app"]) {
         uint64_t generation=_generation;
         [self prompt:[NSString stringWithFormat:@"Confirm remote %@. Input is paused until you decide on the iPhone. Never approve sensitive actions you did not request.",op] decision:^(BOOL allow) {
@@ -311,6 +331,8 @@
     else if([op isEqual:@"volume_up"]||[op isEqual:@"volume_down"]) ok=[_input button:op];
     else if([op isEqual:@"app_switcher"]) {
         ok=[_input openAppSwitcher];
+    } else if([op isEqual:@"control_center"]) {
+        ok=[_input openControlCenter];
     } else if([op isEqual:@"launch_app"]) {
         NSString *bundle=r[@"bundle_id"];
         Class cls=NSClassFromString(@"LSApplicationWorkspace");

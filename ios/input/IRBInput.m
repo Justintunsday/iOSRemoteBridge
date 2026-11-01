@@ -139,6 +139,20 @@ static void observed(void *target,void *ref,void *service,Event event) {
     if(![app respondsToSelector:open]) return NO;
     ((void(*)(id,SEL,id))objc_msgSend)(app,open,nil); return YES;
 }
+- (BOOL)openControlCenter {
+    Class cls=NSClassFromString(@"SBControlCenterController");
+    SEL shared=NSSelectorFromString(@"sharedInstance");
+    if(![cls respondsToSelector:shared]) return NO;
+    id controller=((id(*)(id,SEL))objc_msgSend)(cls,shared);
+    SEL present=NSSelectorFromString(@"presentAnimated:completion:");
+    if([controller respondsToSelector:present]) { ((void(*)(id,SEL,BOOL,id))objc_msgSend)(controller,present,YES,nil); return YES; }
+    present=NSSelectorFromString(@"presentAnimated:");
+    if([controller respondsToSelector:present]) { ((void(*)(id,SEL,BOOL))objc_msgSend)(controller,present,YES); return YES; }
+    return NO;
+}
+- (void)releaseKeys {
+    for(int i=4;i<256;++i) if(_keys[i]) [self key:(uint16_t)i down:NO];
+}
 static uint16_t asciiKey(unichar c,BOOL *shift) {
     *shift=NO;
     if(c>='a'&&c<='z') return 4+c-'a';
@@ -178,7 +192,7 @@ static uint16_t asciiKey(unichar c,BOOL *shift) {
 }
 - (void)releaseAll {
     for(int i=0;i<10;++i) if(_down[i]) [self touch:i phase:2 x:_positions[i].x y:_positions[i].y];
-    for(int i=4;i<256;++i) if(_keys[i]) [self key:(uint16_t)i down:NO];
+    [self releaseKeys];
 }
 /* Singleton lives for SpringBoard's lifetime. Do not deallocate a registered
    HID observer while its run-loop callback still references it. */

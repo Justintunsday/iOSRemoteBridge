@@ -8,6 +8,8 @@
 - (BOOL)key:(uint16_t)usage down:(BOOL)down;
 - (BOOL)button:(NSString *)button;
 - (BOOL)openAppSwitcher;
+- (BOOL)openControlCenter;
+- (void)releaseKeys;
 - (BOOL)typeASCII:(NSString *)text;
 - (BOOL)supportsText:(NSString *)text;
 - (void)releaseAll;

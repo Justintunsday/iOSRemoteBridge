@@ -3,6 +3,7 @@
 #include "RpcReply.h"
 #include "BufferedRenderer.h"
 #include "D3DRenderer.h"
+#include "HIDKeyMap.h"
 #include <windowsx.h>
 #include <commdlg.h>
 #include <commctrl.h>
@@ -13,17 +14,20 @@
 #include <sstream>
 #include <algorithm>
 #include <array>
+#include <set>
 #include <cmath>
 using json=nlohmann::json;
 namespace {
-constexpr UINT FrameMessage=WM_APP+1,StatusMessage=WM_APP+2,ResponseMessage=WM_APP+3;
-constexpr int ExpandedToolbarHeight=220;
+constexpr UINT FrameMessage=WM_APP+1,StatusMessage=WM_APP+2,ResponseMessage=WM_APP+3,KeyboardModeMessage=WM_APP+4;
+constexpr UINT_PTR KeyboardTimer=1;
+constexpr int ExpandedToolbarHeight=250;
 constexpr UINT ToggleToolbarSystem=0x0100;
 HWND window,configEdit,textEdit,bitrateEdit,controlCheck,notice;
 HWND browseButton,connectButton,disconnectButton,homeButton,switcherButton,volumeUpButton,volumeDownButton;
 HWND sendTextButton,bitrateLabel,rotateButton,fitButton,ratioCheck,sharpnessSlider,sharpnessLabel;
 HWND toggleToolbarButton;
 HWND videoWindow,vsyncCheck,fsrCheck;
+HWND keyboardCheck,shortcutHint;
 BufferedRenderer renderer;
 D3DRenderer gpuRenderer;
 bool advancedFailed=false;
@@ -33,6 +37,11 @@ struct DisplayFrame { VideoFrame pixels; int rotation=0; };
 std::shared_ptr<const DisplayFrame> frame;
 std::wstring status;
 std::string responseNotice;
+std::wstring lastRenderNotice;
+std::set<uint16_t> heldKeys;
+bool keyboardApproved=false,keyboardPending=false;
+uint64_t connectionEpoch=0;
+ULONGLONG lastGesture=0;
 std::atomic<int> rotation{0};
 std::atomic<bool> framePosted{false};
 int presentedRotation=0,currentFPS=60,sharpness=40;
@@ -44,16 +53,16 @@ int viewWidth=750,viewHeight=1334;
 RECT sizingStart{};
 double lastX=0,lastY=0;
 ULONGLONG lastMove=0;
-enum {Config=10,Browse,Connect,Disconnect,Home,Switcher,VolumeUp,VolumeDown,SendText,Bitrate,Rotate,Fit,KeepRatio,Sharpness,ToggleToolbar,VSync,FSR};
+enum {Config=10,Browse,Connect,Disconnect,Home,Switcher,VolumeUp,VolumeDown,SendText,Bitrate,Rotate,Fit,KeepRatio,Sharpness,ToggleToolbar,VSync,FSR,KeyboardMode};
 int toolbarHeight() { return toolbarVisible?ExpandedToolbarHeight:0; }
 int minimumClientWidth() {
     int minimum=toolbarVisible?380:160;
     return keepRatio?std::max(minimum,static_cast<int>(std::ceil(120.0*viewWidth/viewHeight))):minimum;
 }
-std::array<HWND,22> toolbarControls() {
+std::array<HWND,24> toolbarControls() {
     return {configEdit,browseButton,connectButton,disconnectButton,controlCheck,homeButton,
             switcherButton,volumeUpButton,volumeDownButton,textEdit,sendTextButton,bitrateEdit,
-            bitrateLabel,rotateButton,fitButton,ratioCheck,sharpnessLabel,sharpnessSlider,notice,toggleToolbarButton,vsyncCheck,fsrCheck};
+            bitrateLabel,rotateButton,fitButton,ratioCheck,sharpnessLabel,sharpnessSlider,notice,toggleToolbarButton,vsyncCheck,fsrCheck,keyboardCheck,shortcutHint};
 }
 std::wstring wide(const std::string &text) {
     int size=MultiByteToWideChar(CP_UTF8,0,text.data(),static_cast<int>(text.size()),nullptr,0);
@@ -88,8 +97,9 @@ void layoutControls(int width) {
     place(textEdit,8,96,textWidth); place(sendTextButton,14+textWidth,96,70);
     place(bitrateEdit,90+textWidth,96,60); place(bitrateLabel,156+textWidth,100,40,20);
     place(ratioCheck,8,126,126); place(sharpnessLabel,140,130,78,20);
-    place(sharpnessSlider,218,123,width-226,28); place(notice,8,185,width-16,30);
+    place(sharpnessSlider,218,123,width-226,28); place(notice,8,215,width-16,30);
     place(vsyncCheck,8,155,90); place(fsrCheck,104,155,100);
+    place(keyboardCheck,8,185,200); place(shortcutHint,214,189,width-222,20);
     place(toggleToolbarButton,width-134,155,126,26);
 }
 SIZE windowBorder(HWND hwnd) {
@@ -119,8 +129,17 @@ VideoFrame rotate(VideoFrame input,int degrees) {
                     output.bgra.data()+(static_cast<size_t>(dy)*output.width+dx)*4);
     } return output;
 }
-void command(json request) {
-    if(!connection||!connection->command(std::move(request))) SetWindowTextW(notice,L"Connect and approve on the iPhone before sending commands.");
+bool command(json request) {
+    if(!connection||!connection->command(std::move(request))) {
+        SetWindowTextW(notice,L"Connect and approve on the iPhone before sending commands."); return false;
+    }
+    return true;
+}
+bool releaseHeldKeys() {
+    auto keys=std::move(heldKeys); heldKeys.clear(); bool ok=true;
+    if(connection&&connection->authorized()) for(uint16_t usage:keys)
+        if(!connection->command({{"op","key_event"},{"usage",usage},{"down",false}})) ok=false;
+    return ok;
 }
 void endDrag() {
     if(dragging) { command({{"op","touch"},{"finger",0},{"phase",2},{"x",lastX},{"y",lastY}}); dragging=false; ReleaseCapture(); }
@@ -184,12 +203,16 @@ void constrainSize(HWND hwnd,UINT edge,RECT &rect) {
     else rect.bottom=rect.top+height;
 }
 void disconnect() {
-    endDrag(); if(connection) connection->close(); connection.reset();
+    releaseHeldKeys(); endDrag(); ++connectionEpoch;
+    keyboardApproved=keyboardPending=false; KillTimer(window,KeyboardTimer);
+    SendMessageW(keyboardCheck,BM_SETCHECK,BST_UNCHECKED,0); EnableWindow(keyboardCheck,TRUE);
+    if(connection) connection->close(); connection.reset();
     { std::lock_guard<std::mutex> lock(frameMutex); frame.reset(); }
     InvalidateRect(videoWindow,nullptr,FALSE); SetWindowTextW(window,L"iOSRemoteBridge - disconnected");
 }
 void connectClient() {
     disconnect();
+    uint64_t epoch=connectionEpoch;
     fitNextFrame=true;
     try {
         std::ifstream stream{std::filesystem::path(editText(configEdit))};
@@ -208,7 +231,12 @@ void connectClient() {
             { std::lock_guard<std::mutex> lock(statusMutex); status=wide(message); }
             PostMessageW(window,StatusMessage,0,0);
         };
-        connection->onResponse=[](const json &reply) {
+        connection->onAuthorization=[epoch](bool) { PostMessageW(window,KeyboardModeMessage,static_cast<WPARAM>(epoch),0); };
+        connection->onResponse=[epoch](const json &reply) {
+            if(reply.value("op",std::string())=="keyboard_mode") {
+                bool enabled=responseSucceeded(reply)&&reply.contains("result")&&reply["result"].value("keyboard_enabled",false);
+                PostMessageW(window,KeyboardModeMessage,static_cast<WPARAM>(epoch),enabled?1:0);
+            }
             if(reply.contains("ok")&&!responseSucceeded(reply)) {
                 { std::lock_guard<std::mutex> lock(statusMutex); responseNotice=reply.value("error",std::string("operation failed")); }
                 PostMessageW(window,ResponseMessage,0,0);
@@ -217,6 +245,29 @@ void connectClient() {
         SetWindowTextW(notice,L"Approve on the iPhone. Esc disconnects.");
         connection->start();
     } catch(const std::exception &) { SetWindowTextW(notice,L"Cannot load pairing file or configuration. Check the local JSON file and required fields."); connection.reset(); }
+}
+void toggleKeyboardMode() {
+    if(keyboardPending) { SetWindowTextW(notice,L"Approve or Reject on the iPhone; Esc disconnects."); return; }
+    if(!connection||!connection->authorized()) {
+        SendMessageW(keyboardCheck,BM_SETCHECK,BST_UNCHECKED,0);
+        SetWindowTextW(notice,L"Connect with Request control and approve on the iPhone first."); return;
+    }
+    endDrag(); releaseHeldKeys();
+    bool enable=!keyboardApproved;
+    if(!command({{"op","keyboard_mode"},{"enabled",enable}})) return;
+    keyboardApproved=false; keyboardPending=true;
+    SendMessageW(keyboardCheck,BM_SETCHECK,enable?BST_CHECKED:BST_UNCHECKED,0); EnableWindow(keyboardCheck,FALSE);
+    SetTimer(window,KeyboardTimer,50000,nullptr);
+    SetWindowTextW(notice,enable?L"Allow live keyboard input on the iPhone.":L"Disabling live keyboard input...");
+}
+bool videoFocused() { HWND focus=GetFocus(); return focus==window||focus==videoWindow; }
+void scrollGesture(bool up) {
+    if(keyboardPending||GetTickCount64()-lastGesture<300) return;
+    endDrag(); lastGesture=GetTickCount64();
+    double x1,y1,x2,y2;
+    irb_unrotate(.5,up?.75:.25,presentedRotation,&x1,&y1);
+    irb_unrotate(.5,up?.25:.75,presentedRotation,&x2,&y2);
+    command({{"op","swipe"},{"x",x1},{"y",y1},{"to_x",x2},{"to_y",y2},{"duration_ms",230}});
 }
 void configure(int fps,double scale) {
     currentFPS=fps; currentScale=scale;
@@ -238,6 +289,7 @@ LRESULT CALLBACK videoProcedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         return SendMessageW(window,message,w,MAKELPARAM(p.x,p.y));
     }
     if(message==WM_CONTEXTMENU) return SendMessageW(window,message,reinterpret_cast<WPARAM>(window),l);
+    if(message==WM_MOUSEWHEEL) return SendMessageW(window,message,w,l);
     if(message==WM_PAINT) {
         PAINTSTRUCT paint; HDC dc=BeginPaint(hwnd,&paint); RECT area{}; GetClientRect(hwnd,&area);
         std::shared_ptr<const DisplayFrame> shown;
@@ -245,6 +297,13 @@ LRESULT CALLBACK videoProcedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         const VideoFrame empty; const VideoFrame &pixels=shown?shown->pixels:empty;
         RECT image{};
         bool painted=gpuRenderer.paint(hwnd,area.right,area.bottom,pixels,image);
+        if(painted&&connection&&connection->authorized()&&!keyboardPending) {
+            bool sync=SendMessageW(vsyncCheck,BM_GETCHECK,0,0)==BST_CHECKED;
+            bool fsr=SendMessageW(fsrCheck,BM_GETCHECK,0,0)==BST_CHECKED;
+            std::wstring display=wide(gpuRenderer.backend())+(sync?L" | VSync on":L" | VSync off")+
+                (gpuRenderer.fsrActive()?L" | FSR1 active":fsr?L" | FSR1 auto":L" | FSR1 off");
+            if(display!=lastRenderNotice) { lastRenderNotice=display; SetWindowTextW(notice,display.c_str()); }
+        }
         if(!painted) {
             if(!advancedFailed) {
                 advancedFailed=true; EnableWindow(vsyncCheck,FALSE); EnableWindow(fsrCheck,FALSE);
@@ -295,6 +354,8 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         toggleToolbarButton=control(L"BUTTON",L"Hide tools (F9)",0,0,0,126,26,ToggleToolbar);
         vsyncCheck=control(L"BUTTON",L"VSync",BS_AUTOCHECKBOX,0,0,90,24,VSync);
         fsrCheck=control(L"BUTTON",L"FSR 1",BS_AUTOCHECKBOX,0,0,100,24,FSR);
+        keyboardCheck=control(L"BUTTON",L"Keyboard+mouse (F10)",BS_AUTOCHECKBOX,0,0,200,24,KeyboardMode);
+        shortcutHint=control(L"STATIC",L"H Home / C Control",SS_NOPREFIX,0,0,160,20,0);
         SendMessageW(vsyncCheck,BM_SETCHECK,BST_CHECKED,0);
         videoWindow=CreateWindowW(L"iOSRemoteBridge.Video",L"",WS_CHILD|WS_VISIBLE|WS_CLIPSIBLINGS,0,0,1,1,hwnd,nullptr,GetModuleHandleW(nullptr),nullptr);
         AppendMenuW(GetSystemMenu(hwnd,FALSE),MF_SEPARATOR,0,nullptr);
@@ -318,6 +379,7 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         case Rotate: endDrag(); rotation=(rotation.load()+90)%360; return 0;
         case Fit: fitWindow(); return 0;
         case ToggleToolbar: setToolbarVisible(!toolbarVisible); return 0;
+        case KeyboardMode: toggleKeyboardMode(); return 0;
         case VSync:
             gpuRenderer.setVSync(SendMessageW(vsyncCheck,BM_GETCHECK,0,0)==BST_CHECKED);
             InvalidateRect(videoWindow,nullptr,FALSE); return 0;
@@ -334,6 +396,8 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         }
         break;
     case WM_KEYDOWN:
+    case WM_SYSKEYDOWN:
+        if(message==WM_SYSKEYDOWN&&w==VK_F4) break;
         if(w==VK_ESCAPE) { disconnect(); return 0; }
         if(w==VK_F1) { endDrag(); rotation=(rotation.load()+90)%360; return 0; }
         if(w==VK_F2) { configure(30,currentScale); return 0; }
@@ -344,16 +408,47 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         if(w==VK_F7) { setSharpness(sharpness-10); return 0; }
         if(w==VK_F8) { setSharpness(sharpness+10); return 0; }
         if(w==VK_F9) { setToolbarVisible(!toolbarVisible); return 0; }
+        if(w==VK_F10) { toggleKeyboardMode(); return 0; }
+        if(keyboardApproved&&videoFocused()) {
+            uint16_t usage=hidUsage(w,l);
+            if(usage&&!heldKeys.count(usage)) {
+                if(command({{"op","key_event"},{"usage",usage},{"down",true}})) heldKeys.insert(usage);
+                else disconnect();
+            }
+            return 0;
+        }
+        if(keyboardPending&&videoFocused()) return 0;
         if(w==VK_RETURN&&GetFocus()==bitrateEdit) { command({{"op","configure"},{"bitrate",GetDlgItemInt(hwnd,Bitrate,nullptr,FALSE)*1000}}); return 0; }
         if((GetKeyState(VK_CONTROL)&0x8000)&&w=='T') { SetFocus(textEdit); return 0; }
-        if(w>=VK_LEFT&&w<=VK_DOWN) {
-            static const int usages[]={0x50,0x52,0x4f,0x51};
-            command({{"op","key"},{"usage",usages[w-VK_LEFT]}}); return 0;
+        if(videoFocused()) {
+            if((GetKeyState(VK_CONTROL)&0x8000)||(GetKeyState(VK_MENU)&0x8000)) break;
+            if(w=='H'&&!(l&(1LL<<30))) { command({{"op","press_home"}}); return 0; }
+            if(w=='C'&&!(l&(1LL<<30))) { command({{"op","control_center"}}); return 0; }
+            if(w==VK_ADD||w==VK_OEM_PLUS) { command({{"op","volume_up"}}); return 0; }
+            if(w==VK_SUBTRACT||w==VK_OEM_MINUS) { command({{"op","volume_down"}}); return 0; }
+            if(w==VK_UP||w==VK_DOWN) { scrollGesture(w==VK_UP); return 0; }
         }
         break;
+    case WM_KEYUP:
+    case WM_SYSKEYUP: {
+        uint16_t usage=hidUsage(w,l);
+        if(heldKeys.count(usage)) {
+            if(command({{"op","key_event"},{"usage",usage},{"down",false}})) heldKeys.erase(usage);
+            else disconnect();
+            return 0;
+        } break;
+    }
+    case WM_KILLFOCUS: if(!releaseHeldKeys()) disconnect(); return 0;
+    case WM_ACTIVATEAPP: if(!w) { endDrag(); if(!releaseHeldKeys()) disconnect(); } break;
+    case WM_TIMER:
+        if(w==KeyboardTimer&&keyboardPending) {
+            keyboardPending=keyboardApproved=false; SendMessageW(keyboardCheck,BM_SETCHECK,BST_UNCHECKED,0);
+            EnableWindow(keyboardCheck,TRUE); KillTimer(hwnd,KeyboardTimer);
+            SetWindowTextW(notice,L"Keyboard approval timed out; press F10 to try again."); return 0;
+        } break;
     case WM_LBUTTONDOWN: {
         double x,y; SetFocus(hwnd);
-        if(point(l,x,y)&&connection&&connection->authorized()) {
+        if(point(l,x,y)&&connection&&connection->authorized()&&!keyboardPending) {
             lastX=x; lastY=y; dragging=true; SetCapture(hwnd);
             command({{"op","touch"},{"finger",0},{"phase",0},{"x",x},{"y",y}});
         } return 0;
@@ -365,6 +460,11 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         } } return 0;
     case WM_LBUTTONUP: endDrag(); return 0;
     case WM_CAPTURECHANGED: if(dragging) endDrag(); return 0;
+    case WM_MOUSEWHEEL: {
+        POINT p{GET_X_LPARAM(l),GET_Y_LPARAM(l)}; ScreenToClient(hwnd,&p);
+        if(PtInRect(&videoRect,p)) { scrollGesture(GET_WHEEL_DELTA_WPARAM(w)<0); return 0; }
+        break;
+    }
     case WM_CONTEXTMENU: {
         if(reinterpret_cast<HWND>(w)!=hwnd) break;
         POINT position{GET_X_LPARAM(l),GET_Y_LPARAM(l)};
@@ -373,6 +473,12 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
             POINT clientPoint=position; ScreenToClient(hwnd,&clientPoint);
             RECT client{}; GetClientRect(hwnd,&client);
             if(!PtInRect(&client,clientPoint)) break; // Keep the native title-bar menu.
+            if(keyboardApproved) {
+                double x,y;
+                if(point(MAKELPARAM(clientPoint.x,clientPoint.y),x,y))
+                    command({{"op","long_press"},{"x",x},{"y",y},{"duration_ms",500}});
+                return 0;
+            }
         }
         endDrag();
         HMENU menu=CreatePopupMenu();
@@ -401,6 +507,13 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
     }
     case StatusMessage: { std::lock_guard<std::mutex> lock(statusMutex); SetWindowTextW(hwnd,(L"iOSRemoteBridge | "+status).c_str()); return 0; }
     case ResponseMessage: { std::lock_guard<std::mutex> lock(statusMutex); SetWindowTextW(notice,wide(responseNotice).c_str()); return 0; }
+    case KeyboardModeMessage:
+        if(static_cast<uint64_t>(w)==connectionEpoch) {
+            keyboardApproved=l!=0; keyboardPending=false; heldKeys.clear(); KillTimer(hwnd,KeyboardTimer);
+            SendMessageW(keyboardCheck,BM_SETCHECK,keyboardApproved?BST_CHECKED:BST_UNCHECKED,0); EnableWindow(keyboardCheck,TRUE);
+            SetWindowTextW(shortcutHint,keyboardApproved?L"Keys sent to iPhone":L"H Home / C Control");
+            lastRenderNotice.clear();
+        } return 0;
     case WM_ENTERSIZEMOVE: endDrag(); GetWindowRect(hwnd,&sizingStart); return 0;
     case WM_SIZING:
         if(keepRatio) { constrainSize(hwnd,static_cast<UINT>(w),*reinterpret_cast<RECT *>(l)); return TRUE; }
@@ -487,8 +600,8 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int show) {
     MSG message;
     while(GetMessageW(&message,nullptr,0,0)>0) {
         bool shortcut=message.message==WM_KEYDOWN&&(message.wParam==VK_ESCAPE||
-                      (message.wParam>=VK_F1&&message.wParam<=VK_F9)||
-                      ((GetKeyState(VK_CONTROL)&0x8000)&&message.wParam=='T')||
+                      (message.wParam>=VK_F1&&message.wParam<=VK_F10)||
+                      (!keyboardApproved&&(GetKeyState(VK_CONTROL)&0x8000)&&message.wParam=='T')||
                       (message.wParam==VK_RETURN&&GetFocus()==bitrateEdit));
         if(shortcut) SendMessageW(hwnd,message.message,message.wParam,message.lParam);
         else { TranslateMessage(&message); DispatchMessageW(&message); }

@@ -21,6 +21,7 @@ static inline NSNumber *IRBBool(BOOL value) {
 }
 static inline NSDictionary *IRBReply(NSDictionary *request,id result,NSString *error) {
     NSMutableDictionary *reply=[@{@"id":request[@"id"]?:@0,@"ok":IRBBool(error==nil)} mutableCopy];
+    if([request[@"op"] isKindOfClass:NSString.class]) reply[@"op"]=request[@"op"];
     if(error) reply[@"error"]=error; else reply[@"result"]=result?:@{};
     return reply;
 }

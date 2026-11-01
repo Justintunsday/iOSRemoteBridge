@@ -26,6 +26,7 @@ public:
     std::function<void(VideoFrame &&)> onFrame;
     std::function<void(const std::string &)> onStatus;
     std::function<void(const json &)> onResponse;
+    std::function<void(bool)> onAuthorization;
     Connection(json config,bool control=true,int fps=60,bool hardware=true);
     ~Connection();
     void start();

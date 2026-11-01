@@ -15,7 +15,8 @@ static inline BOOL IRBValidateRequest(NSDictionary *r,BOOL internal) {
     dispatch_once(&once,^{ schemas=@{
         @"get_device_info":@[],@"get_screen_frame":@[],@"get_orientation":@[],
         @"get_connection_status":@[],@"get_performance_stats":@[],@"request_keyframe":@[],
-        @"disconnect":@[],@"press_home":@[],@"app_switcher":@[],@"volume_up":@[],@"volume_down":@[],
+        @"disconnect":@[],@"press_home":@[],@"app_switcher":@[],@"control_center":@[],@"volume_up":@[],@"volume_down":@[],
+        @"keyboard_mode":@[@"enabled"],@"key_event":@[@"usage",@"down"],
         @"tap":@[@"x",@"y"],@"double_tap":@[@"x",@"y"],@"long_press":@[@"x",@"y",@"duration_ms"],
         @"swipe":@[@"x",@"y",@"to_x",@"to_y",@"duration_ms"],
         @"touch":@[@"x",@"y",@"finger",@"phase"],@"type_text":@[@"text"],
@@ -32,6 +33,8 @@ static inline BOOL IRBValidateRequest(NSDictionary *r,BOOL internal) {
     if(r[@"phase"]&&!IRBFiniteNumber(r[@"phase"],0,2,YES)) return NO;
     if(r[@"duration_ms"]&&!IRBFiniteNumber(r[@"duration_ms"],40,5000,YES)) return NO;
     if(r[@"usage"]&&!IRBFiniteNumber(r[@"usage"],4,231,YES)) return NO;
+    for(NSString *key in @[@"enabled",@"down"]) if(r[key]&&
+        (!IRBNumber(r[key])||CFGetTypeID((__bridge CFTypeRef)r[key])!=CFBooleanGetTypeID())) return NO;
     if(r[@"bitrate"]&&!IRBFiniteNumber(r[@"bitrate"],500000,20000000,YES)) return NO;
     if(r[@"fps"]||r[@"scale"]) {
         if(!IRBFiniteNumber(r[@"fps"],30,60,YES)||([r[@"fps"] intValue]!=30&&[r[@"fps"] intValue]!=60)||

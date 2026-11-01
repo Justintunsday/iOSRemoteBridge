@@ -4,6 +4,9 @@
 static void require(BOOL value) { if(!value) { fprintf(stderr,"command validation failed\n"); exit(1); } }
 int main(void) { @autoreleasepool {
     require(IRBValidateRequest(@{@"op":@"tap",@"id":@1,@"x":@.5,@"y":@.3},NO));
+    require(IRBValidateRequest(@{@"op":@"control_center",@"id":@1},NO));
+    require(IRBValidateRequest(@{@"op":@"keyboard_mode",@"id":@1,@"enabled":@YES},NO));
+    require(IRBValidateRequest(@{@"op":@"key_event",@"id":@1,@"usage":@225,@"down":@NO},NO));
     require(IRBValidateRequest(@{@"op":@"configure",@"id":@0,@"bitrate":@1000000},YES));
     require(!IRBValidateRequest(@{@"op":@"configure",@"id":@0,@"bitrate":@1000000},NO));
     NSArray *bad=@[
@@ -21,6 +24,9 @@ int main(void) { @autoreleasepool {
         @{@"op":@"launch_app",@"id":@1,@"bundle_id":NSNull.null},
         @{@"op":@"key",@"id":@1,@"usage":@65540},
         @{@"op":@"key",@"id":@1,@"usage":@40,@"down":@YES},
+        @{@"op":@"keyboard_mode",@"id":@1,@"enabled":@1},
+        @{@"op":@"key_event",@"id":@1,@"usage":@225,@"down":@"false"},
+        @{@"op":@"key_event",@"id":@1,@"usage":@232,@"down":@YES},
         @{@"op":@"unknown",@"id":@1}
     ];
     for(NSDictionary *r in bad) require(!IRBValidateRequest(r,NO));
