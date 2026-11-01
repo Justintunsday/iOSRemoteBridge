@@ -1,0 +1,89 @@
+name: build-client
+on:
+  push:
+    branches: [main, 'feature/**']
+    paths: ['client/**', 'shared/**', 'vcpkg.json', 'CMakeLists.txt', 'tools/native_smoke.py', '.github/workflows/build-client.yml']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    env:
+      VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-cache,readwrite'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Restore dependency cache
+        uses: actions/cache@v4
+        with:
+          path: .vcpkg-cache
+          key: windows-vcpkg-${{ hashFiles('vcpkg.json') }}
+      - name: Install pinned vcpkg
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .vcpkg-cache, build-logs | Out-Null
+          git init .vcpkg
+          git -C .vcpkg remote add origin https://github.com/microsoft/vcpkg.git
+          git -C .vcpkg fetch --depth=1 origin 9a5dfef5d1a0438a7d24856a85bd60f309d355e9
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C .vcpkg checkout --detach FETCH_HEAD
+          & ./.vcpkg/bootstrap-vcpkg.bat -disableMetrics
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Resolve dependencies and configure
+        shell: pwsh
+        run: |
+          cmake -S . -B build -A x64 -DIRB_BUILD_CLIENT=ON -DCMAKE_TOOLCHAIN_FILE="$pwd/.vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows 2>&1 | Tee-Object build-logs/configure.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Compile native receiver
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --parallel 2>&1 | Tee-Object build-logs/client-build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ctest --test-dir build -C Release --output-on-failure 2>&1 | Tee-Object build-logs/tests.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Generate encoded fixture and verify decoder
+        shell: pwsh
+        run: |
+          choco install ffmpeg --no-progress -y
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $ffmpeg = Get-ChildItem C:/ProgramData/chocolatey/lib/ffmpeg -Filter ffmpeg.exe -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          & $ffmpeg -hide_banner -loglevel error -f lavfi -i color=red:s=64x64 -frames:v 1 -c:v libx264 -profile:v baseline -tune zerolatency -f h264 build/fixture.h264
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ./build/client/windows/Release/decoder-smoke.exe build/fixture.h264 2>&1 | Tee-Object build-logs/decoder-test.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/native_smoke.py ./build/client/windows/Release/network-smoke.exe build/fixture.h264 2>&1 | Tee-Object build-logs/native-tls-test.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Prepare executable and license bundle
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist/windows/licenses, dist/sources | Out-Null
+          Copy-Item build/client/windows/Release/iOSRemoteBridge.exe dist/windows/
+          Copy-Item build/client/windows/Release/*.dll dist/windows/
+          Copy-Item LICENSE,THIRD_PARTY_NOTICES.md dist/windows/licenses/
+          Copy-Item build/vcpkg_installed/x64-windows/share/ffmpeg,build/vcpkg_installed/x64-windows/share/openssl,build/vcpkg_installed/x64-windows/share/nlohmann_json dist/windows/licenses/ -Recurse
+          Copy-Item .vcpkg/buildtrees/ffmpeg/src/* dist/sources/ -Recurse
+          Copy-Item vcpkg.json dist/sources/
+          Copy-Item docs/CLIENT.md dist/windows/README.md
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: windows-client-x64
+          path: dist/windows/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: windows-ffmpeg-corresponding-source
+          path: dist/sources/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-build-logs
+          path: |
+            build-logs/
+            .vcpkg/buildtrees/*/*.log
