@@ -103,7 +103,7 @@ void Connection::session() {
         if(outgoing.size()>128) throw std::runtime_error("outgoing queue limit");
     };
     enqueue(IRB_AUTH,json({{"token",config_.at("token")},{"control",control_},{"fps",fps_},{"video_window",3}}).dump());
-    if(onStatus) onStatus("Encrypted connection; approve on the unlocked iPhone");
+    if(onStatus) onStatus("Encrypted connection; starting paired session (unlock the iPhone)");
     Decoder decoder(preferHardware_); VideoFrame frame;
     std::vector<uint8_t> received; uint8_t chunk[65536];
     uint64_t lastPing=0,statsAt=nowUS(),lastData=nowUS(),connected=nowUS(); unsigned frames=0;
