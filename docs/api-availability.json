@@ -1,0 +1,95 @@
+[
+  {
+    "source": "https://developer.apple.com/tutorials/data/documentation/screencapturekit/scstream.json",
+    "inspected_date": "2026-11-01",
+    "identifier": "SCStream",
+    "platforms": [
+      {
+        "introducedAt": "27.0",
+        "name": "iOS"
+      },
+      {
+        "introducedAt": "27.0",
+        "name": "iPadOS"
+      },
+      {
+        "introducedAt": "18.2",
+        "name": "Mac Catalyst"
+      },
+      {
+        "introducedAt": "12.3",
+        "name": "macOS"
+      },
+      {
+        "introducedAt": "27.0",
+        "name": "tvOS"
+      },
+      {
+        "introducedAt": "27.0",
+        "name": "visionOS"
+      }
+    ]
+  },
+  {
+    "source": "https://developer.apple.com/tutorials/data/documentation/videotoolbox/kvtvideoencoderspecification_enablelowlatencyratecontrol.json",
+    "inspected_date": "2026-11-01",
+    "identifier": "kVTVideoEncoderSpecification_EnableLowLatencyRateControl",
+    "platforms": [
+      {
+        "introducedAt": "14.5",
+        "name": "iOS"
+      },
+      {
+        "introducedAt": "14.5",
+        "name": "iPadOS"
+      },
+      {
+        "introducedAt": "14.5",
+        "name": "Mac Catalyst"
+      },
+      {
+        "introducedAt": "11.3",
+        "name": "macOS"
+      },
+      {
+        "introducedAt": "14.5",
+        "name": "tvOS"
+      },
+      {
+        "introducedAt": "1.0",
+        "name": "visionOS"
+      }
+    ]
+  },
+  {
+    "source": "https://developer.apple.com/tutorials/data/documentation/videotoolbox/kvtvideoencoderspecification_requirehardwareacceleratedvideoencoder.json",
+    "inspected_date": "2026-11-01",
+    "identifier": "kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder",
+    "platforms": [
+      {
+        "introducedAt": "17.4",
+        "name": "iOS"
+      },
+      {
+        "introducedAt": "17.4",
+        "name": "iPadOS"
+      },
+      {
+        "introducedAt": "17.4",
+        "name": "Mac Catalyst"
+      },
+      {
+        "introducedAt": "10.9",
+        "name": "macOS"
+      },
+      {
+        "introducedAt": "17.4",
+        "name": "tvOS"
+      },
+      {
+        "introducedAt": "1.1",
+        "name": "visionOS"
+      }
+    ]
+  }
+]

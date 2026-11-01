@@ -8,5 +8,6 @@
 - (BOOL)startWidth:(int)width height:(int)height fps:(int)fps bitrate:(int)bitrate;
 - (OSStatus)encode:(CVPixelBufferRef)buffer pts:(uint64_t)pts forceKeyframe:(BOOL)key;
 - (BOOL)setBitrate:(int)bitrate;
+- (BOOL)setFPS:(int)fps;
 - (void)stop;
 @end

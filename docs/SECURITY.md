@@ -1,0 +1,60 @@
+# Security model and limits
+
+This is an experimental, supervised remote-control prototype. Authorization
+requires both a pinned TLS connection with a random 256-bit bearer token and
+physical approval on the unlocked iPhone. It is not an unattended-access server.
+
+- TLS is provided by Apple's Network/Security frameworks and OpenSSL or Python
+  ssl. No custom cipher or password exchange is implemented. The clients verify
+  the exact SHA-256 certificate pin before sending the token, even for a
+  self-signed identity. Wrong-pin tests assert that no AUTH bytes are sent.
+- Provision over an existing trusted SSH connection. Do not obtain a new pin
+  from an untrusted network response. Pairing generates a different identity
+  and token each time and never overwrites existing files. Rotate compromised
+  pairing files on both endpoints, bootout the daemon and bootstrap it again.
+- Device state is mobile-owned mode 0700; token JSON and PKCS12 identity are
+  0600 regular files opened without following symlinks. The daemon refuses
+  weaker permissions. Protect the client JSON with the current Windows user
+  ACL; it is plaintext local credential storage. Credentials are excluded from
+  git and no real device credentials are used in CI.
+- The network process runs as mobile. The SpringBoard library inherits
+  SpringBoard's process privileges. Signing a dylib with extra entitlements
+  would not grant those entitlements to its host. The only daemon entitlement
+  requested here is platform-application; its exact necessity and Keychain
+  import behavior still need target-device verification. No protected-content,
+  task-port or kernel-modification entitlements are added.
+- Network clients cannot reach the private Unix socket directly. Its mode is
+  0600 inside the 0700 directory, and the daemon checks the peer's UID. This is
+  a boundary against network clients and sandboxed apps, **not** against root
+  or another unsandboxed process already running as mobile on a compromised
+  jailbreak. The socket does not cryptographically attest a SpringBoard PID.
+- Framing rejects unknown types, flags, versions, sequence errors and oversized
+  lengths before allocating a payload. Video caps at 8 MiB, control at 64 KiB,
+  responses at 2 MiB. Both daemon and bridge validate operation schemas, numeric
+  types/ranges and field names. Outgoing queues and command rate are bounded.
+- Only one network session is accepted. Capture starts after local approval,
+  has a visible STOP control and expires after 15 minutes. Lock detection is
+  dynamically checked and fails closed if the private selector is missing.
+  Respring and daemon/bridge loss invalidate the session. The client discards
+  queued input before reconnecting; it never retries an ambiguous gesture.
+- During a sensitive-action prompt, incoming input is rejected and capture is
+  paused. Text entry, single HID key presses and launch_app always ask locally.
+  Generic taps/swipes cannot be semantically classified: an approved control
+  session can interact with a payment, deletion or permission screen. The owner
+  must supervise and stop a session before such actions. This prototype does
+  not claim comprehensive semantic sensitive-action detection or sandboxing
+  of an AI agent. Read-only sessions are available and recommended for inspection.
+- Capture honors the system's output, including black/protected surfaces. There
+  is no black-frame fallback, secure-layer override or DRM bypass.
+
+The listener is Wi-Fi constrained. It has no UPnP, port forwarding or automatic
+internet exposure. If remote internet use is needed, first validate the system
+on-device and use a separately managed authenticated VPN. The current IPv4
+listener/interface binding has not been physically verified. Do not treat the
+prototype as security-audited or ready for a public endpoint.
+
+Automated checks include fragmented TLS records, wrong certificate pins,
+oversized/truncated frames, invalid coordinate ranges, hostile Foundation
+argument types, reserved request IDs, wrong response sequences and owner refusal.
+These protect specific invariants; they are not a penetration test of iOS or
+the third-party codec libraries.

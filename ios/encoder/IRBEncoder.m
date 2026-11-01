@@ -60,6 +60,10 @@ static void encoded(void *ref,void *source,OSStatus status,VTEncodeInfoFlags fla
                (__bridge CFDictionaryRef)props,(void *)(uintptr_t)IRBNow(),NULL);
 }
 - (BOOL)setBitrate:(int)bitrate { return _session&&[self property:kVTCompressionPropertyKey_AverageBitRate value:@(bitrate) required:YES]; }
+- (BOOL)setFPS:(int)fps {
+    if(!_session||![self property:kVTCompressionPropertyKey_ExpectedFrameRate value:@(fps) required:YES]) return NO;
+    _fps=fps; return YES;
+}
 - (void)sample:(CMSampleBufferRef)sb status:(OSStatus)status start:(uint64_t)start {
     if(status||!sb||!CMSampleBufferDataIsReady(sb)) { if(self.output) self.output(nil,NO,0,0,status?:-1); return; }
     BOOL key=YES;

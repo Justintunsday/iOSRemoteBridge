@@ -6,6 +6,8 @@
 #import <sys/un.h>
 #import <sys/utsname.h>
 #import <unistd.h>
+#import <sys/resource.h>
+#import <mach/mach.h>
 #import "../common/IRBLocalPeer.h"
 #import "../common/IRBValidation.h"
 #import "../capture/IRBCapture.h"
@@ -121,6 +123,7 @@
     [_window.rootViewController dismissViewControllerAnimated:NO completion:nil];
     _window.hidden=YES; [_previousWindow makeKeyWindow]; _window=nil;
     _encoding=NO; _credit=NO;
+    UIDevice.currentDevice.batteryMonitoringEnabled=NO;
     _pendingConfiguration=nil;
     if(was) [_peer send:IRB_STOP flags:0 pts:0 data:IRBJSON(@{@"reason":reason})];
 }
@@ -145,6 +148,7 @@
     };
     _credit=YES; _forceKey=YES; _encoding=NO; _failures=0; _slow=0;
     _started=IRBNow(); _frames=0; _skipped=0;
+    UIDevice.currentDevice.batteryMonitoringEnabled=YES;
     _display=[CADisplayLink displayLinkWithTarget:self selector:@selector(tick:)];
     _display.preferredFramesPerSecond=_fps;
     [_display addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
@@ -154,6 +158,13 @@
     (void)link;
     if(!_approved) return;
     if([self locked]||IRBNow()>_deadline) { [self stopSession:@"locked or session expired"]; return; }
+    NSProcessInfo *process=NSProcessInfo.processInfo;
+    if(process.thermalState==NSProcessInfoThermalStateCritical) { [self stopSession:@"critical thermal pressure"]; return; }
+    int effective=(process.thermalState>=NSProcessInfoThermalStateSerious||process.lowPowerModeEnabled)?MIN(_fps,30):_fps;
+    if(_display.preferredFramesPerSecond!=effective) {
+        if(![_encoder setFPS:effective]) { [self stopSession:@"frame-rate update failed"]; return; }
+        _display.preferredFramesPerSecond=effective;
+    }
     if(_encoding&&IRBNow()-_encodeStart>2000000) { [self stopSession:@"encoder callback timed out"]; return; }
     if(!_credit||_encoding||_confirming) { ++_skipped; return; }
     uint64_t start=IRBNow(); CVPixelBufferRef frame=[_capture copyFrame]; _captureMs=(IRBNow()-start)/1000.0;
@@ -210,8 +221,18 @@
         [self reply:r result:[self info] error:nil]; return;
     }
     if([op isEqual:@"get_performance_stats"]) {
+        struct rusage usage={0}; getrusage(RUSAGE_SELF,&usage);
+        mach_task_basic_info_data_t memory={0}; mach_msg_type_number_t count=MACH_TASK_BASIC_INFO_COUNT;
+        BOOL haveMemory=task_info(mach_task_self(),MACH_TASK_BASIC_INFO,(task_info_t)&memory,&count)==KERN_SUCCESS;
         [self reply:r result:@{@"capture_ms_last":@(_captureMs),@"encode_ms_last":@(_encodeMs),
              @"encoded_frames":@(_frames),@"backpressure_skips":@(_skipped),@"bitrate":@(_bitrate),
+             @"fps_paced":@(_display.preferredFramesPerSecond),
+             @"thermal_state":@(NSProcessInfo.processInfo.thermalState),
+             @"low_power_mode":@(NSProcessInfo.processInfo.lowPowerModeEnabled),
+             @"battery_level":@(UIDevice.currentDevice.batteryLevel),
+             @"springboard_resident_bytes":haveMemory?@(memory.resident_size):[NSNull null],
+             @"springboard_cpu_user_seconds":@(usage.ru_utime.tv_sec+usage.ru_utime.tv_usec/1000000.0),
+             @"springboard_cpu_system_seconds":@(usage.ru_stime.tv_sec+usage.ru_stime.tv_usec/1000000.0),
              @"encoded_fps_mean":@(_frames*1000000.0/MAX(1ULL,IRBNow()-_started)),
              @"glass_to_glass_ms":[NSNull null],@"hardware_encoder":_encoder.hardwareStatus?:@"unknown"} error:nil]; return;
     }
