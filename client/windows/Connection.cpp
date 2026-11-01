@@ -101,12 +101,12 @@ void Connection::session() {
         std::copy(payload.begin(),payload.end(),packet.begin()+IRB_HEADER_SIZE); outgoing.push_back(std::move(packet));
         if(outgoing.size()>128) throw std::runtime_error("outgoing queue limit");
     };
-    enqueue(IRB_AUTH,json({{"token",config_.at("token")},{"control",control_},{"fps",fps_}}).dump());
+    enqueue(IRB_AUTH,json({{"token",config_.at("token")},{"control",control_},{"fps",fps_},{"video_window",2}}).dump());
     if(onStatus) onStatus("Encrypted connection; approve on the unlocked iPhone");
     Decoder decoder(preferHardware_); VideoFrame frame;
     std::vector<uint8_t> received; uint8_t chunk[65536];
     uint64_t lastPing=0,statsAt=nowUS(),lastData=nowUS(),connected=nowUS(); unsigned frames=0;
-    double rtt=0,decodeMS=0; bool waitForKey=false;
+    double rtt=0,decodeMS=0; bool waitForKey=false,writeWantsRead=false,readWantsWrite=false;
     while(!stop_) {
         uint64_t now=nowUS();
         if(now-lastData>65000000ULL||(!authorized_&&now-connected>60000000ULL)) throw std::runtime_error("connection/approval timed out");
@@ -116,19 +116,24 @@ void Connection::session() {
             { std::lock_guard<std::mutex> lock(queueMutex_); requests.swap(commands_); }
             for(auto &r:requests) { r["id"]=++request; enqueue(IRB_CONTROL,r.dump()); }
         }
-        if(!outgoing.empty()) {
+        // Flush queued control and frame credits before waiting for more input.
+        // A read-only 10-ms wait per packet otherwise delays ACKs behind gestures.
+        for(unsigned writes=0;writes<16&&!outgoing.empty();++writes) {
             auto &packet=outgoing.front();
             int result=SSL_write(tls.get(),packet.data()+sentOffset,static_cast<int>(packet.size()-sentOffset));
-            if(result>0) { sentOffset+=static_cast<size_t>(result); if(sentOffset==packet.size()) { outgoing.pop_front(); sentOffset=0; } }
-            else { int error=SSL_get_error(tls.get(),result); if(error!=SSL_ERROR_WANT_READ&&error!=SSL_ERROR_WANT_WRITE) throw std::runtime_error("TLS write failed"); }
+            if(result>0) { writeWantsRead=false; sentOffset+=static_cast<size_t>(result); if(sentOffset==packet.size()) { outgoing.pop_front(); sentOffset=0; } }
+            else { int error=SSL_get_error(tls.get(),result); if(error!=SSL_ERROR_WANT_READ&&error!=SSL_ERROR_WANT_WRITE) throw std::runtime_error("TLS write failed"); writeWantsRead=error==SSL_ERROR_WANT_READ; break; }
         }
-        fd_set readSet; FD_ZERO(&readSet); FD_SET(fd,&readSet); timeval delay{0,10000};
-        int ready=SSL_pending(tls.get())?1:select(0,&readSet,nullptr,nullptr,&delay);
+        fd_set readSet,writeSet; FD_ZERO(&readSet); FD_ZERO(&writeSet); FD_SET(fd,&readSet);
+        bool wantsWrite=(!outgoing.empty()&&!writeWantsRead)||readWantsWrite;
+        if(wantsWrite) FD_SET(fd,&writeSet);
+        timeval delay{0,10000};
+        int ready=SSL_pending(tls.get())?1:select(0,&readSet,wantsWrite?&writeSet:nullptr,nullptr,&delay);
         if(ready<0) throw std::runtime_error("socket select failed");
-        if(ready>0) {
+        if(ready>0&&(SSL_pending(tls.get())||FD_ISSET(fd,&readSet)||(readWantsWrite&&FD_ISSET(fd,&writeSet)))) {
             int result=SSL_read(tls.get(),chunk,sizeof(chunk));
-            if(result>0) { received.insert(received.end(),chunk,chunk+result); lastData=nowUS(); }
-            else { int error=SSL_get_error(tls.get(),result); if(error!=SSL_ERROR_WANT_READ&&error!=SSL_ERROR_WANT_WRITE) throw std::runtime_error("iPhone disconnected"); }
+            if(result>0) { readWantsWrite=false; received.insert(received.end(),chunk,chunk+result); lastData=nowUS(); }
+            else { int error=SSL_get_error(tls.get(),result); if(error!=SSL_ERROR_WANT_READ&&error!=SSL_ERROR_WANT_WRITE) throw std::runtime_error("iPhone disconnected"); readWantsWrite=error==SSL_ERROR_WANT_WRITE; }
         }
         while(received.size()>=IRB_HEADER_SIZE) {
             irb_header header{};

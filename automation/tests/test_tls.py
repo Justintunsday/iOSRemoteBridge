@@ -31,7 +31,7 @@ class TLSTests(unittest.TestCase):
         config = json.loads((self.folder / "client-config.json").read_text())
         config["port"] = listener.getsockname()[1]
         observed = {"auth": False, "error": None, "credit": threading.Event(),
-                    "ping": threading.Event(), "deferred": threading.Event()}
+                    "ping": threading.Event(), "deferred": threading.Event(), "credits": []}
         def handle():
             try:
                 raw, _ = listener.accept()
@@ -39,6 +39,7 @@ class TLSTests(unittest.TestCase):
                     sock.settimeout(5)
                     h = p.unpack(p.recv_exact(sock, 24)); auth = json.loads(p.recv_exact(sock, h.length))
                     observed["auth"] = True
+                    observed["video_window"] = auth.get("video_window", 1)
                     if h.kind != p.AUTH or auth["token"] != config["token"]: return
                     def send(kind, seq, payload, pts=0):
                         body = json.dumps(payload).encode() if isinstance(payload, dict) else payload
@@ -49,9 +50,13 @@ class TLSTests(unittest.TestCase):
                     send(p.RESPONSE, 2, {"event": "authorized", "device": {"model": "SIMULATOR"}})
                     send(p.VIDEO, 3, b"\0\0\0\1fake-frame", 12345)
                     seq = 3
+                    if observed["video_window"] == 2:
+                        seq += 1; send(p.VIDEO, seq, b"\0\0\0\1next-frame", 12346)
                     while True:
                         h = p.unpack(p.recv_exact(sock, 24)); data = p.recv_exact(sock, h.length)
-                        if h.kind == p.CREDIT and h.pts_us == 12345: observed["credit"].set()
+                        if h.kind == p.CREDIT:
+                            observed["credits"].append(h.pts_us)
+                            if len(observed["credits"]) == observed["video_window"]: observed["credit"].set()
                         elif h.kind == p.PING:
                             observed["ping"].set()
                             seq += 1; send(p.PONG, seq, data, h.pts_us)
@@ -77,7 +82,22 @@ class TLSTests(unittest.TestCase):
             self.assertEqual(client.request("get_device_info"), {"echo": "get_device_info"})
             self.assertTrue(observed["auth"])
             self.assertTrue(observed["credit"].wait(2))
+            self.assertEqual(observed["video_window"], 2)
+            self.assertEqual(observed["credits"], [12345, 12346])
             with self.assertRaisesRegex(BridgeError, "owner declined"): client.request("reject")
+
+    def test_legacy_single_frame_window(self):
+        config, observed = self.server()
+        with BridgeClient(config, timeout=5, video_window=1) as client:
+            self.assertEqual(client.request("get_device_info"), {"echo": "get_device_info"})
+            self.assertTrue(observed["credit"].wait(2))
+            self.assertEqual(observed["credits"], [12345])
+
+    def test_invalid_frame_window_rejected_before_network(self):
+        config = json.loads((self.folder / "client-config.json").read_text())
+        for value in (0, 3, True, 1.5, "2"):
+            with self.assertRaisesRegex(ValueError, "video_window"):
+                BridgeClient(config, video_window=value)
 
     def test_wrong_pin_sends_no_token(self):
         config, observed = self.server(); config["certificate_sha256"] = "0"*64

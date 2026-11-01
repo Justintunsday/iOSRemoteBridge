@@ -1,5 +1,6 @@
 """Exercise the compiled Windows client over real loopback TLS with H.264."""
 import json
+from collections import deque
 from pathlib import Path
 import socket
 import ssl
@@ -37,7 +38,10 @@ def run(executable, fixture, wrong_pin):
                     h = p.unpack(p.recv_exact(sock, 24))
                     auth = json.loads(p.recv_exact(sock, h.length)); auth_seen.set()
                     if h.kind != p.AUTH or auth["token"] != config["token"]: raise ValueError("incorrect authentication")
+                    if auth.get("video_window") != 2 or auth.get("fps") != 60: raise ValueError("interactive pipeline negotiation missing")
                     sequence = 0
+                    pending_video = deque()
+                    final_ready = False
                     def send(kind, data, pts=0):
                         nonlocal sequence
                         sequence += 1
@@ -46,10 +50,19 @@ def run(executable, fixture, wrong_pin):
                         packet = header + body
                         for start in range(0, len(packet), 97): sock.sendall(packet[start:start+97])
                     send(p.RESPONSE, {"event": "authorized", "device": {"model": "TLS_SIMULATOR"}})
+                    pending_video.append(123456)
                     send(p.VIDEO, Path(fixture).read_bytes(), 123456)
+                    pending_video.append(123457)
+                    send(p.VIDEO, Path(fixture).read_bytes(), 123457)
+                    received_sequence = h.sequence
                     while True:
                         h = p.unpack(p.recv_exact(sock, 24)); payload = p.recv_exact(sock, h.length)
-                        if h.kind == p.CREDIT and h.pts_us == 123457: ack_seen.set()
+                        received_sequence += 1
+                        if h.sequence != received_sequence: raise ValueError("client sequence mismatch")
+                        if h.kind == p.CREDIT:
+                            if h.length or not pending_video or pending_video.popleft() != h.pts_us:
+                                raise ValueError("client frame credit out of order")
+                            if h.pts_us == 123458: ack_seen.set()
                         elif h.kind == p.PING: send(p.PONG, payload, h.pts_us)
                         elif h.kind == p.CONTROL:
                             request = json.loads(payload)
@@ -62,7 +75,11 @@ def run(executable, fixture, wrong_pin):
                                 send(p.RESPONSE, {"id": request["id"], "ok": True if request["op"] == "get_device_info" else 1,
                                                   "result": {"model": "TLS_SIMULATOR"}})
                             if len(actions_seen) == 7:
-                                send(p.VIDEO, Path(fixture).read_bytes(), 123457)
+                                final_ready = True
+                        if final_ready and len(pending_video) < 2:
+                            pending_video.append(123458)
+                            send(p.VIDEO, Path(fixture).read_bytes(), 123458)
+                            final_ready = False
             except (EOFError, ConnectionError): pass
             except Exception as exc: errors.append(str(exc))
         thread = threading.Thread(target=serve, daemon=True); thread.start()

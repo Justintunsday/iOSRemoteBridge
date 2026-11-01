@@ -34,7 +34,7 @@ void Decoder::open(bool preferHardware) {
 }
 void Decoder::release() {
     avcodec_free_context(&context_); av_frame_free(&frame_); av_frame_free(&cpu_);
-    av_buffer_unref(&device_); sws_freeContext(scaler_); scaler_=nullptr; hardware_=false;
+    av_buffer_unref(&device_); converter_.reset(); hardware_=false;
 }
 Decoder::~Decoder() { release(); }
 void Decoder::fallbackToSoftware() { release(); open(false); }
@@ -53,16 +53,13 @@ bool Decoder::decode(const uint8_t *data,size_t size,VideoFrame &output) {
             av_frame_unref(cpu_);
             int transfer=av_hwframe_transfer_data(cpu_,frame_,0);
             if(transfer<0) { av_frame_unref(frame_); throw std::runtime_error("GPU frame transfer: "+avError(transfer)); }
+            // av_hwframe_transfer_data copies pixel storage, not AVFrame color
+            // properties. Losing JPEG/full range here over-expands highlights.
+            int properties=av_frame_copy_props(cpu_,frame_);
+            if(properties<0) { av_frame_unref(frame_); throw std::runtime_error("GPU frame properties: "+avError(properties)); }
             source=cpu_;
         }
-        if(source->width<=0||source->height<=0||source->width>4096||source->height>4096) throw std::runtime_error("unsafe decoded dimensions");
-        scaler_=sws_getCachedContext(scaler_,source->width,source->height,static_cast<AVPixelFormat>(source->format),
-                source->width,source->height,AV_PIX_FMT_BGRA,SWS_FAST_BILINEAR,nullptr,nullptr,nullptr);
-        if(!scaler_) throw std::runtime_error("pixel conversion unavailable");
-        output.width=source->width; output.height=source->height;
-        output.bgra.resize(static_cast<size_t>(output.width)*output.height*4);
-        uint8_t *planes[]={output.bgra.data(),nullptr,nullptr,nullptr}; int strides[]={output.width*4,0,0,0};
-        sws_scale(scaler_,source->data,source->linesize,0,source->height,planes,strides);
+        converter_.convert(*source,output);
         av_frame_unref(frame_); produced=true;
     }
     if(error!=AVERROR(EAGAIN)&&error!=AVERROR_EOF) throw std::runtime_error("decode output: "+avError(error));

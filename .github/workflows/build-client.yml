@@ -2,7 +2,7 @@ name: build-client
 on:
   push:
     branches: [main, 'feature/**', 'codex/**']
-    paths: ['client/**', 'shared/**', 'vcpkg.json', 'CMakeLists.txt', 'tools/native_smoke.py', 'tools/prepare_ffmpeg_port.py', '.github/workflows/build-client.yml']
+    paths: ['client/**', 'shared/**', 'vcpkg.json', 'CMakeLists.txt', 'tools/native_smoke.py', 'tools/generate_color_fixtures.py', 'tools/prepare_ffmpeg_port.py', '.github/workflows/build-client.yml']
   pull_request:
   workflow_dispatch:
 permissions:
@@ -64,11 +64,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tools/native_smoke.py ./build/client/windows/Release/network-smoke.exe build/fixture.h264 2>&1 | Tee-Object build-logs/native-tls-test.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/generate_color_fixtures.py $ffmpeg build/color-fixtures
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ./build/client/windows/Release/irb-color-check.exe build/color-fixtures/gray-full.h264 build/color-fixtures/gray-limited.h264 2>&1 | Tee-Object build-logs/color-decode-test.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Prepare executable and license bundle
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force dist/windows/licenses, dist/sources | Out-Null
+          New-Item -ItemType Directory -Force dist/windows/licenses, dist/windows/diagnostics, dist/sources | Out-Null
           Copy-Item build/client/windows/Release/iOSRemoteBridge.exe dist/windows/
+          Copy-Item build/client/windows/Release/irb-color-check.exe dist/windows/
+          Copy-Item build/color-fixtures/*.h264 dist/windows/diagnostics/
           Copy-Item build/client/windows/Release/*.dll dist/windows/
           Copy-Item LICENSE,THIRD_PARTY_NOTICES.md dist/windows/licenses/
           Copy-Item licenses/* dist/windows/licenses/

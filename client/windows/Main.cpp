@@ -26,7 +26,7 @@ std::wstring status;
 std::string responseNotice;
 std::atomic<int> rotation{0};
 std::atomic<bool> framePosted{false};
-int frameRotation=0,currentFPS=30;
+int frameRotation=0,currentFPS=60;
 double currentScale=1;
 RECT videoRect{};
 bool dragging=false;

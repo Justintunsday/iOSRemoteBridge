@@ -13,6 +13,7 @@
 #import "../capture/IRBCapture.h"
 #import "../encoder/IRBEncoder.h"
 #import "../input/IRBInput.h"
+#include "../../shared/irb_frame_window.h"
 
 @interface IRBBridge : NSObject
 - (void)start;
@@ -27,9 +28,12 @@
     UIButton *_stopButton;
     CIContext *_ci;
     CVPixelBufferRef _lastFrame;
-    BOOL _connecting,_approved,_control,_confirming,_credit,_encoding,_forceKey;
+    BOOL _connecting,_approved,_control,_confirming,_forceKey;
     BOOL _snapshotPending;
-    uint64_t _deadline,_encodeStart,_generation,_frames,_skipped,_started;
+    uint64_t _deadline,_generation,_frames,_skipped,_started,_lastVideoPTS;
+    irb_frame_window _videoWindow;
+    unsigned _windowLimit;
+    NSMutableSet<NSNumber *> *_encodingPTS;
     double _captureMs,_encodeMs,_scale;
     int _fps,_bitrate,_failures,_slow;
     dispatch_source_t _gesture;
@@ -147,7 +151,7 @@
     if(_lastFrame) { CVPixelBufferRelease(_lastFrame); _lastFrame=NULL; }
     [_window.rootViewController dismissViewControllerAnimated:NO completion:nil];
     _window.hidden=YES; [_previousWindow makeKeyWindow]; _window=nil;
-    _encoding=NO; _credit=NO;
+    [_encodingPTS removeAllObjects]; irb_window_init(&_videoWindow,1);
     UIDevice.currentDevice.batteryMonitoringEnabled=NO;
     _pendingConfiguration=nil;
     _ci=nil; _snapshotPending=NO;
@@ -162,17 +166,22 @@
     _encoder.output=^(NSData *data,BOOL key,uint64_t pts,double ms,OSStatus error) {
         dispatch_async(dispatch_get_main_queue(),^{
             IRBBridge *s=weak; if(!s||!s->_approved||generation!=s->_generation) return;
-            s->_encoding=NO; s->_encodeMs=ms;
+            s->_encodeMs=ms;
             if(error||!data.length) {
-                s->_credit=YES; s->_forceKey=YES;
-                if(++s->_failures>=3) [s stopSession:@"encoder failed repeatedly; reconnect to recreate session"];
+                [s stopSession:@"encoder output failed; reconnect to recreate the bounded pipeline"];
                 return;
             }
+            if(![s->_encodingPTS containsObject:@(pts)]||pts<=s->_lastVideoPTS) {
+                [s stopSession:@"encoder output timestamp order violated"]; return;
+            }
+            [s->_encodingPTS removeObject:@(pts)]; s->_lastVideoPTS=pts;
             s->_failures=0; ++s->_frames;
             [s->_peer send:IRB_VIDEO flags:key?1:0 pts:pts data:data];
         });
     };
-    _credit=YES; _forceKey=YES; _encoding=NO; _failures=0; _slow=0;
+    irb_window_init(&_videoWindow,_windowLimit);
+    _encodingPTS=[NSMutableSet set]; _lastVideoPTS=0;
+    _forceKey=YES; _failures=0; _slow=0;
     _started=IRBNow(); _frames=0; _skipped=0;
     UIDevice.currentDevice.batteryMonitoringEnabled=YES;
     _display=[CADisplayLink displayLinkWithTarget:self selector:@selector(tick:)];
@@ -192,24 +201,27 @@
         if(![_encoder setFPS:effective]) { [self stopSession:@"frame-rate update failed"]; return; }
         _display.preferredFramesPerSecond=effective;
     }
-    if(_encoding&&IRBNow()-_encodeStart>2000000) { [self stopSession:@"encoder callback timed out"]; return; }
-    if(!_credit||_encoding||_confirming) { ++_skipped; return; }
+    for(NSNumber *pts in _encodingPTS) if(IRBNow()-pts.unsignedLongLongValue>2000000) {
+        [self stopSession:@"encoder callback timed out"]; return;
+    }
+    if(!irb_window_available(&_videoWindow)||_encodingPTS.count>=_videoWindow.limit||_confirming||_pendingConfiguration) { ++_skipped; return; }
     uint64_t start=IRBNow(); CVPixelBufferRef frame=[_capture copyFrame]; _captureMs=(IRBNow()-start)/1000.0;
     if(!frame) { if(++_failures>=3) [self stopSession:_capture.error?:@"capture failed"]; return; }
     _slow=_captureMs>25?_slow+1:0;
     if(_slow>=5) { CVPixelBufferRelease(frame); [self stopSession:@"capture main-thread budget exceeded"]; return; }
     if(_lastFrame) CVPixelBufferRelease(_lastFrame); _lastFrame=frame;
-    _credit=NO; _encoding=YES; _encodeStart=IRBNow();
+    if(!irb_window_push(&_videoWindow,start,IRBNow())) { [self stopSession:@"capture credit invariant failed"]; return; }
+    [_encodingPTS addObject:@(start)];
     OSStatus error=[_encoder encode:frame pts:start forceKeyframe:_forceKey]; _forceKey=NO;
     if(error) {
-        _encoding=NO; _credit=YES; _forceKey=YES;
-        if(++_failures>=3) [self stopSession:@"encoder submission failed; reconnect to recover"];
+        [self stopSession:@"encoder submission failed; reconnect to recover"];
     }
 }
 - (NSDictionary *)info {
     struct utsname u; uname(&u);
     return @{@"model":[NSString stringWithUTF8String:u.machine],@"ios":UIDevice.currentDevice.systemVersion,
         @"width":@(_capture.width),@"height":@(_capture.height),@"fps_requested":@(_fps),
+        @"video_window":@(_videoWindow.limit),
         @"control":@(_control),@"orientation":@"natural_portrait",@"input_status":_input.status,
         @"input_diagnostics":_input.diagnostics,
         @"hardware_encoder":_encoder.hardwareStatus?:@"unknown",@"low_latency_mode":@(_encoder.lowLatency),
@@ -218,8 +230,9 @@
 - (void)received:(irb_header)h data:(NSData *)data {
     if(h.type==IRB_STOP) { [self stopSession:@"connection ended"]; return; }
     if(h.type==IRB_CREDIT) {
-        if(!_encoding) _credit=YES;
-        if(_pendingConfiguration&&_credit) {
+        if(!_approved) return;
+        if(h.length||!irb_window_ack(&_videoWindow,h.pts_us)) { [self stopSession:@"invalid local frame acknowledgement"]; return; }
+        if(_pendingConfiguration&&!_videoWindow.count&&!_encodingPTS.count) {
             NSDictionary *r=_pendingConfiguration; _pendingConfiguration=nil;
             [self applyConfiguration:r];
         }
@@ -229,6 +242,7 @@
         if(_approved||_confirming) return;
         NSDictionary *options=IRBDictionary(data);
         _fps=[IRBNumber(options[@"fps"]) intValue]==60?60:30;
+        _windowLimit=[IRBNumber(options[@"video_window"]) intValue]==2?2:1;
         _bitrate=8000000; _scale=1; _control=[IRBNumber(options[@"control"]) boolValue];
         uint64_t generation=++_generation;
         NSString *message=_control?@"An authenticated remote requests screen viewing and system-wide input for 15 minutes. Supervise sensitive screens. Text, keyboard and app launches ask again locally. Tap the red STOP control to disconnect.":@"An authenticated remote requests screen viewing for 15 minutes. Tap the red STOP control to disconnect.";
@@ -254,6 +268,7 @@
         BOOL haveMemory=task_info(mach_task_self(),MACH_TASK_BASIC_INFO,(task_info_t)&memory,&count)==KERN_SUCCESS;
         [self reply:r result:@{@"capture_ms_last":@(_captureMs),@"encode_ms_last":@(_encodeMs),
              @"encoded_frames":@(_frames),@"backpressure_skips":@(_skipped),@"bitrate":@(_bitrate),
+             @"video_window":@(_videoWindow.limit),@"frames_in_flight":@(_videoWindow.count),@"pending_encodes":@(_encodingPTS.count),
              @"fps_paced":@(_display.preferredFramesPerSecond),
              @"thermal_state":@(NSProcessInfo.processInfo.thermalState),
              @"low_power_mode":@(NSProcessInfo.processInfo.lowPowerModeEnabled),
@@ -274,7 +289,7 @@
             int fps=[IRBNumber(r[@"fps"]) intValue]; double scale=IRBReal(r[@"scale"]);
             if((fps!=30&&fps!=60)||!isfinite(scale)||scale<.25||scale>1) { [self reply:r result:nil error:@"fps 30/60 and scale .25..1 required"]; return; }
             if(_pendingConfiguration) { [self reply:r result:nil error:@"quality change already pending"]; return; }
-            if(_encoding||!_credit) { _pendingConfiguration=[r copy]; return; }
+            if(_encodingPTS.count||_videoWindow.count) { _pendingConfiguration=[r copy]; return; }
             [self applyConfiguration:r]; return;
         } else if(![_encoder setBitrate:rate]) { [self reply:r result:nil error:_encoder.error]; return; }
         _bitrate=rate; [self reply:r result:[self info] error:nil]; return;

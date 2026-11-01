@@ -11,6 +11,7 @@
 #import <signal.h>
 #import "../common/IRBLocalPeer.h"
 #import "../common/IRBValidation.h"
+#include "../../shared/irb_frame_window.h"
 
 static NSData *privateFile(NSString *path,NSUInteger max) {
     int fd=open(path.fileSystemRepresentation,O_RDONLY|O_NOFOLLOW);
@@ -40,9 +41,10 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
     IRBLocalPeer *_bridge;
     NSMutableData *_received;
     uint32_t _rx,_tx;
-    uint64_t _generation,_cooldown,_connectedAt,_lastActivity,_ackPTS,_videoSentAt,_rateStart;
+    uint64_t _generation,_cooldown,_connectedAt,_lastActivity,_rateStart;
     NSUInteger _pendingBytes,_commands;
-    BOOL _authenticated,_authorized,_awaitingAck;
+    BOOL _authenticated,_authorized;
+    irb_frame_window _videoWindow;
     double _frameCycleMs;
     int _adaptiveBitrate,_bitrateCeiling;
     uint64_t _lastAdapt;
@@ -90,7 +92,7 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
         if(self->_connection&&((!self->_authenticated&&now-self->_connectedAt>10000000)||
            (self->_authenticated&&!self->_authorized&&now-self->_connectedAt>55000000)||
            (self->_authorized&&now-self->_lastActivity>15000000)||
-           (self->_awaitingAck&&now-self->_videoSentAt>5000000))) [self disconnect:@"connection timed out"];
+           (self->_videoWindow.count&&now-irb_window_oldest(&self->_videoWindow)>5000000))) [self disconnect:@"connection timed out"];
     }];
     return YES;
 }
@@ -126,7 +128,7 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
 - (void)acceptNetwork:(nw_connection_t)c {
     if(_connection||IRBNow()<_cooldown||!_bridge) { nw_connection_cancel(c); return; }
     _connection=c; ++_generation; _rx=0; _tx=0; _pendingBytes=0;
-    _authenticated=NO; _authorized=NO; _awaitingAck=NO;
+    _authenticated=NO; _authorized=NO; irb_window_init(&_videoWindow,1);
     _received=[NSMutableData data]; _connectedAt=IRBNow(); _lastActivity=_connectedAt;
     _commands=0; _rateStart=_connectedAt;
     _frameCycleMs=0; _adaptiveBitrate=8000000; _bitrateCeiling=8000000; _lastAdapt=_connectedAt;
@@ -141,7 +143,7 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
 - (void)disconnect:(NSString *)reason {
     if(!_connection) return;
     nw_connection_t c=_connection; _connection=nil; ++_generation;
-    _authenticated=NO; _authorized=NO; _awaitingAck=NO; _received=nil; _pendingBytes=0;
+    _authenticated=NO; _authorized=NO; irb_window_init(&_videoWindow,1); _received=nil; _pendingBytes=0;
     _cooldown=MAX(_cooldown,IRBNow()+2000000);
     [_bridge send:IRB_STOP flags:0 pts:0 data:IRBJSON(@{@"reason":reason})];
     nw_connection_cancel(c); NSLog(@"[IRB] %@",reason);
@@ -192,12 +194,14 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
             [self send:IRB_RESPONSE flags:0 pts:0 data:IRBJSON(@{@"event":@"approval_required"})];
             BOOL control=[auth[@"control"] isKindOfClass:NSNumber.class]&&[auth[@"control"] boolValue];
             int fps=([auth[@"fps"] isKindOfClass:NSNumber.class]&&[auth[@"fps"] intValue]==60)?60:30;
-            [_bridge send:IRB_START flags:0 pts:0 data:IRBJSON(@{@"control":@(control),@"fps":@(fps)})];
+            unsigned window=[IRBNumber(auth[@"video_window"]) intValue]==2?2:1;
+            irb_window_init(&_videoWindow,window);
+            [_bridge send:IRB_START flags:0 pts:0 data:IRBJSON(@{@"control":@(control),@"fps":@(fps),@"video_window":@(window)})];
         } else if(h.type==IRB_PING) [self send:IRB_PONG flags:0 pts:h.pts_us data:data];
         else if(h.type==IRB_CREDIT) {
-            if(!_authorized||!_awaitingAck||h.pts_us!=_ackPTS||h.length) { [self disconnect:@"invalid frame acknowledgement"]; return; }
-            _awaitingAck=NO; [_bridge send:IRB_CREDIT flags:0 pts:h.pts_us data:nil];
-            double cycle=(now-_ackPTS)/1000.0;
+            if(!_authorized||h.length||!irb_window_ack(&_videoWindow,h.pts_us)) { [self disconnect:@"invalid frame acknowledgement"]; return; }
+            [_bridge send:IRB_CREDIT flags:0 pts:h.pts_us data:nil];
+            double cycle=(now-h.pts_us)/1000.0;
             _frameCycleMs=_frameCycleMs?_frameCycleMs*.9+cycle*.1:cycle;
             if(now-_lastAdapt>3000000) {
                 int desired=_adaptiveBitrate;
@@ -247,8 +251,7 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
         }
         [self send:IRB_RESPONSE flags:0 pts:h.pts_us data:data];
     } else if(h.type==IRB_VIDEO&&_authorized) {
-        if(_awaitingAck) { [self disconnect:@"bridge violated frame credit"]; return; }
-        _awaitingAck=YES; _ackPTS=h.pts_us; _videoSentAt=IRBNow();
+        if(!irb_window_push(&_videoWindow,h.pts_us,IRBNow())) { [self disconnect:@"bridge violated frame credit or timestamp order"]; return; }
         [self send:IRB_VIDEO flags:h.flags pts:h.pts_us data:data];
     }
 }

@@ -30,7 +30,7 @@ int main(int argc,char **argv) {
             size_t center=(32*64+32)*4;
             bool red=frame.width==64&&frame.height==64&&frame.bgra.size()==64*64*4&&
                      frame.bgra[center]<20&&frame.bgra[center+1]<20&&frame.bgra[center+2]>220;
-            pixels=red&&++frameCount>=2;
+            pixels=red&&++frameCount>=3;
             ready.notify_all();
         };
         connection.onResponse=[&](const nlohmann::json &r) {
@@ -49,7 +49,7 @@ int main(int argc,char **argv) {
           result=(wrongPin?pinRefused:(pixels&&rpc))?0:1;
         }
         connection.close();
-        if(!result) std::cout<<(wrongPin?"wrong pin refused before authentication":"TLS/H.264 survived repeated actions, legacy 0/1 replies and rejection; pixels verified after input")<<std::endl;
+        if(!result) std::cout<<(wrongPin?"wrong pin refused before authentication":"Two-frame TLS/H.264 pipeline: ordered credits, repeated actions, legacy 0/1 replies, rejection and post-input pixels passed")<<std::endl;
     } catch(const std::exception &e) { std::cerr<<e.what()<<std::endl; }
     WSACleanup(); return result;
 }

@@ -16,7 +16,7 @@ class BridgeError(RuntimeError):
     pass
 
 class BridgeClient:
-    def __init__(self, config, *, control=False, fps=30, timeout=60):
+    def __init__(self, config, *, control=False, fps=30, timeout=60, video_window=2):
         if isinstance(config, (str, Path)):
             config = json.loads(Path(config).read_text(encoding="utf-8"))
         self.config = dict(config)
@@ -29,6 +29,8 @@ class BridgeClient:
         if type(port) is not int or not 1024 <= port <= 65535:
             raise ValueError("port must be 1024..65535")
         if fps not in (30, 60): raise ValueError("fps must be 30 or 60")
+        if type(video_window) is not int or video_window not in (1, 2): raise ValueError("video_window must be 1 or 2")
+        self.video_window = video_window
         self.control, self.fps, self.timeout = control, fps, timeout
         self.sock = None
         self._sequence = self._rx = self._request = 0
@@ -59,7 +61,7 @@ class BridgeClient:
             if not hmac.compare_digest(pin, self.config["certificate_sha256"].lower()):
                 raise BridgeError("server certificate pin mismatch; no credentials sent")
             self.sock.setblocking(False)
-            self._send(wire.AUTH, {"token": self.config["token"], "control": self.control, "fps": self.fps})
+            self._send(wire.AUTH, {"token": self.config["token"], "control": self.control, "fps": self.fps, "video_window": self.video_window})
             self._reader = threading.Thread(target=self._read, daemon=True)
             self._reader.start()
             deadline = time.monotonic() + self.timeout

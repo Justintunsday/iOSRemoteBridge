@@ -40,7 +40,7 @@ typedef void (*RenderDisplay)(mach_port_t,CFStringRef,IOSurfaceRef,int,int);
     NSMutableDictionary *attrs=[@{(id)kCVPixelBufferWidthKey:@(_nativeWidth), (id)kCVPixelBufferHeightKey:@(_nativeHeight),
         (id)kCVPixelBufferPixelFormatTypeKey:@(kCVPixelFormatType_32BGRA),
         (id)kCVPixelBufferIOSurfacePropertiesKey:@{}, (id)kCVPixelBufferBytesPerRowAlignmentKey:@64} mutableCopy];
-    CVReturn r=CVPixelBufferPoolCreate(NULL,(__bridge CFDictionaryRef)@{(id)kCVPixelBufferPoolMinimumBufferCountKey:@3},
+    CVReturn r=CVPixelBufferPoolCreate(NULL,(__bridge CFDictionaryRef)@{(id)kCVPixelBufferPoolMinimumBufferCountKey:@4},
                                       (__bridge CFDictionaryRef)attrs,&_pool);
     if(r) _error=[NSString stringWithFormat:@"pixel pool: %d",r];
     if(!r&&(_width!=_nativeWidth||_height!=_nativeHeight)) {
@@ -54,7 +54,8 @@ typedef void (*RenderDisplay)(mach_port_t,CFStringRef,IOSurfaceRef,int,int);
 - (CVPixelBufferRef)copyFrame {
     if(!_pool||!_render) return NULL;
     CVPixelBufferRef pb=NULL;
-    NSDictionary *aux=@{(id)kCVPixelBufferPoolAllocationThresholdKey:@3};
+    // Two encoder submissions, one retained snapshot and one capture target.
+    NSDictionary *aux=@{(id)kCVPixelBufferPoolAllocationThresholdKey:@4};
     if(CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(NULL,_pool,(__bridge CFDictionaryRef)aux,&pb)) return NULL;
     IOSurfaceRef surface=CVPixelBufferGetIOSurface(pb);
     if(!surface) { _error=@"pixel buffer has no IOSurface"; CVPixelBufferRelease(pb); return NULL; }
