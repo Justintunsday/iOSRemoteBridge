@@ -28,6 +28,7 @@
     CIContext *_ci;
     CVPixelBufferRef _lastFrame;
     BOOL _connecting,_approved,_control,_confirming,_credit,_encoding,_forceKey;
+    BOOL _snapshotPending;
     uint64_t _deadline,_encodeStart,_generation,_frames,_skipped,_started;
     double _captureMs,_encodeMs,_scale;
     int _fps,_bitrate,_failures,_slow;
@@ -43,7 +44,7 @@
     return ((BOOL(*)(id,SEL))objc_msgSend)(manager,locked);
 }
 - (void)start {
-    _input=[IRBInput new]; _ci=[CIContext contextWithOptions:@{kCIContextUseSoftwareRenderer:@NO}];
+    _input=[IRBInput new];
     [NSTimer scheduledTimerWithTimeInterval:3 repeats:YES block:^(NSTimer *timer) {
         (void)timer; [self connect];
         if(self->_approved&&([self locked]||IRBNow()>self->_deadline)) [self stopSession:@"locked or session expired"];
@@ -125,6 +126,7 @@
     _encoding=NO; _credit=NO;
     UIDevice.currentDevice.batteryMonitoringEnabled=NO;
     _pendingConfiguration=nil;
+    _ci=nil; _snapshotPending=NO;
     if(was) [_peer send:IRB_STOP flags:0 pts:0 data:IRBJSON(@{@"reason":reason})];
 }
 - (BOOL)startPipeline {
@@ -237,14 +239,7 @@
              @"glass_to_glass_ms":[NSNull null],@"hardware_encoder":_encoder.hardwareStatus?:@"unknown"} error:nil]; return;
     }
     if([op isEqual:@"get_screen_frame"]) {
-        if(!_lastFrame||_confirming) { [self reply:r result:nil error:@"frame unavailable"]; return; }
-        CIImage *image=[CIImage imageWithCVPixelBuffer:_lastFrame];
-        CGImageRef cg=[_ci createCGImage:image fromRect:image.extent];
-        NSData *jpeg=cg?UIImageJPEGRepresentation([UIImage imageWithCGImage:cg],.65):nil;
-        if(cg) CGImageRelease(cg);
-        if(!jpeg||jpeg.length>1400000) { [self reply:r result:nil error:@"JPEG unavailable or exceeds response limit"]; return; }
-        [self reply:r result:@{@"mime":@"image/jpeg",@"base64":[jpeg base64EncodedStringWithOptions:0],
-             @"width":@(_capture.width),@"height":@(_capture.height),@"orientation":@"natural_portrait"} error:nil]; return;
+        [self snapshot:r]; return;
     }
     if([op isEqual:@"configure"]) {
         int rate=[IRBNumber(r[@"bitrate"]) intValue];
@@ -308,6 +303,30 @@
     _fps=[IRBNumber(r[@"fps"]) intValue]; _scale=IRBReal(r[@"scale"]); _bitrate=[IRBNumber(r[@"bitrate"]) intValue];
     if(![self startPipeline]) { [self stopSession:@"reconfiguration failed"]; return; }
     [self reply:r result:[self info] error:nil];
+}
+- (void)snapshot:(NSDictionary *)r {
+    if(!_lastFrame||_confirming||_snapshotPending) { [self reply:r result:nil error:@"frame unavailable or snapshot busy"]; return; }
+    _snapshotPending=YES;
+    if(!_ci) _ci=[CIContext contextWithOptions:@{kCIContextUseSoftwareRenderer:@NO,kCIContextCacheIntermediates:@NO}];
+    CIContext *context=_ci;
+    CVPixelBufferRef buffer=CVPixelBufferRetain(_lastFrame);
+    int width=(int)CVPixelBufferGetWidth(buffer),height=(int)CVPixelBufferGetHeight(buffer);
+    uint64_t generation=_generation;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{ @autoreleasepool {
+        CIImage *image=[CIImage imageWithCVPixelBuffer:buffer];
+        CGImageRef cg=[context createCGImage:image fromRect:image.extent];
+        NSData *jpeg=cg?UIImageJPEGRepresentation([UIImage imageWithCGImage:cg],.65):nil;
+        if(cg) CGImageRelease(cg);
+        CVPixelBufferRelease(buffer);
+        NSString *encoded=jpeg.length<=1400000?[jpeg base64EncodedStringWithOptions:0]:nil;
+        dispatch_async(dispatch_get_main_queue(),^{
+            if(generation!=self->_generation||!self->_approved) return;
+            self->_snapshotPending=NO;
+            if(!encoded) { [self reply:r result:nil error:@"JPEG unavailable or exceeds response limit"]; return; }
+            [self reply:r result:@{@"mime":@"image/jpeg",@"base64":encoded,@"width":@(width),
+                 @"height":@(height),@"orientation":@"natural_portrait"} error:nil];
+        });
+    }});
 }
 - (void)typeText:(NSDictionary *)r {
     NSString *text=r[@"text"];
