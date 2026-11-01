@@ -293,7 +293,7 @@
         _keyboardEnabled=NO; [_input releaseKeys]; [self nativeRequest:r]; return;
     }
     if(!_control||[self locked]) { [self reply:r result:nil error:@"input disabled or phone locked"]; return; }
-    if([op isEqual:@"key_event"]||[op isEqual:@"mouse_event"]) {
+    if([op isEqual:@"key_event"]||[op isEqual:@"mouse_event"]||[op isEqual:@"mouse_delta"]) {
         if(!_keyboardEnabled) { [self reply:r result:nil error:@"enable System mouse+keyboard (F10) first"]; return; }
         [self nativeRequest:r]; return;
     }

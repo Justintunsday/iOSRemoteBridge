@@ -5,7 +5,7 @@
 @property(nonatomic,readonly) NSString *error;
 - (BOOL)start;
 - (BOOL)key:(uint16_t)usage down:(BOOL)down;
-- (BOOL)mouseX:(double)x y:(double)y buttons:(uint8_t)buttons wheel:(int8_t)wheel;
+- (BOOL)mouseDX:(int16_t)dx dy:(int16_t)dy buttons:(uint8_t)buttons wheel:(int8_t)wheel;
 - (NSDictionary *)diagnostics;
 - (void)stop;
 @end

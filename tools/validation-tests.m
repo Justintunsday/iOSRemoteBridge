@@ -8,6 +8,7 @@ int main(void) { @autoreleasepool {
     require(IRBValidateRequest(@{@"op":@"keyboard_mode",@"id":@1,@"enabled":@YES},NO));
     require(IRBValidateRequest(@{@"op":@"key_event",@"id":@1,@"usage":@225,@"down":@NO},NO));
     require(IRBValidateRequest(@{@"op":@"mouse_event",@"id":@1,@"x":@0,@"y":@1,@"buttons":@31,@"wheel":@-127},NO));
+    require(IRBValidateRequest(@{@"op":@"mouse_delta",@"id":@1,@"dx":@-32767,@"dy":@32767,@"buttons":@31,@"wheel":@-127},NO));
     require(IRBValidateRequest(@{@"op":@"configure",@"id":@0,@"bitrate":@1000000},YES));
     require(!IRBValidateRequest(@{@"op":@"configure",@"id":@0,@"bitrate":@1000000},NO));
     NSArray *bad=@[
@@ -33,6 +34,10 @@ int main(void) { @autoreleasepool {
         @{@"op":@"mouse_event",@"id":@1,@"x":@.5,@"y":@.5,@"buttons":@0,@"wheel":@128},
         @{@"op":@"mouse_event",@"id":@1,@"x":@.5,@"y":@.5,@"buttons":@0,@"wheel":@.5},
         @{@"op":@"mouse_event",@"id":@1,@"x":@.5,@"y":@.5,@"buttons":@0},
+        @{@"op":@"mouse_delta",@"id":@1,@"dx":@32768,@"dy":@0,@"buttons":@0,@"wheel":@0},
+        @{@"op":@"mouse_delta",@"id":@1,@"dx":@YES,@"dy":@0,@"buttons":@0,@"wheel":@0},
+        @{@"op":@"mouse_delta",@"id":@1,@"dx":@.5,@"dy":@0,@"buttons":@0,@"wheel":@0},
+        @{@"op":@"mouse_delta",@"id":@1,@"dx":@0,@"dy":NSNull.null,@"buttons":@0,@"wheel":@0},
         @{@"op":@"unknown",@"id":@1}
     ];
     for(NSDictionary *r in bad) require(!IRBValidateRequest(r,NO));

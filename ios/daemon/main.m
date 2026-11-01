@@ -242,7 +242,7 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
         if(!_authenticated||!_authorized||h.pts_us!=_generation) return;
         NSDictionary *r=IRBDictionary(data); NSString *op=r[@"op"];
         if(!IRBValidateRequest(r,NO)) return;
-        BOOL ok=NO; NSDictionary *result=nil;
+        BOOL ok=NO; NSDictionary *result=nil; NSString *operationError=nil;
         if([op isEqual:@"keyboard_mode"]) {
             if([r[@"enabled"] boolValue]) {
                 if(!_nativeHID) _nativeHID=[IRBNativeHID new];
@@ -253,10 +253,12 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
         } else if([op isEqual:@"key_event"]) {
             ok=[_nativeHID key:[r[@"usage"] unsignedShortValue] down:[r[@"down"] boolValue]];
         } else if([op isEqual:@"mouse_event"]) {
-            ok=[_nativeHID mouseX:IRBReal(r[@"x"]) y:IRBReal(r[@"y"]) buttons:[r[@"buttons"] unsignedCharValue] wheel:[r[@"wheel"] charValue]];
+            operationError=@"Update the Windows viewer: native iOS mouse input now uses relative motion";
+        } else if([op isEqual:@"mouse_delta"]) {
+            ok=[_nativeHID mouseDX:[r[@"dx"] shortValue] dy:[r[@"dy"] shortValue] buttons:[r[@"buttons"] unsignedCharValue] wheel:[r[@"wheel"] charValue]];
         } else return;
         if(!result) result=@{@"state":@"submitted",@"delivery_verified":@NO,@"hid":[_nativeHID diagnostics]?:@{}};
-        NSString *error=ok?nil:(_nativeHID.error?:@"native HID mode is disabled");
+        NSString *error=ok?nil:(operationError?:_nativeHID.error?:@"native HID mode is disabled");
         [_bridge send:IRB_HID flags:0 pts:h.pts_us data:IRBJSON(IRBReply(r,result,error))];
         return;
     }

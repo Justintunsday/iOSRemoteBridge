@@ -17,7 +17,6 @@ typedef int32_t (*ObjectRelease)(uint32_t);
     RegistryID _registryID;
     ObjectRelease _objectRelease;
     uint8_t _keys[256];
-    uint8_t _buttons;
     uint64_t _keyboardReports,_pointerReports;
     uint64_t _relativeReports;
     NSString *_error;
@@ -82,23 +81,20 @@ typedef int32_t (*ObjectRelease)(uint32_t);
     if(self.active) return YES;
     [self stop];
     if(!_create||!_report) { _error=@"IOHIDUserDevice APIs unavailable on this iOS version"; return NO; }
-    NSArray *products=@[@"iOSRemoteBridge keyboard",@"iOSRemoteBridge pointer position",@"iOSRemoteBridge mouse buttons"];
+    NSArray *products=@[@"iOSRemoteBridge keyboard",@"iOSRemoteBridge native mouse"];
     for(unsigned i=0;i<IRB_HID_DEVICE_COUNT;++i) {
         size_t length=0; const uint8_t *descriptor=irb_hid_device_descriptor(i,&length);
         NSDictionary *properties=@{@"ReportDescriptor":[NSData dataWithBytes:descriptor length:length],
             @"Product":products[i],@"Manufacturer":@"iOSRemoteBridge",@"Transport":@"Virtual",
-            @"VendorID":@0x1209,@"ProductID":@(0x4952+i),@"ReportInterval":@8000,
-            // The iOS event driver otherwise trims absolute axis bounds before
-            // normalizing them. Full-screen coordinates require the full range.
-            @"AbsoluteAxisBoundsRemovalPercentage":@0};
+            @"VendorID":@0x1209,@"ProductID":@(i==IRB_HID_KEYBOARD?0x4952:0x4954),@"ReportInterval":@8000};
         _devices[i]=_create(kCFAllocatorDefault,(__bridge CFDictionaryRef)properties);
         if(!_devices[i]) {
             [self probeCreationFailure]; [self stop];
             _error=[NSString stringWithFormat:@"Native HID device %u creation failed (%@)",i,_creationProbe]; return NO;
         }
     }
-    memset(_keys,0,sizeof(_keys)); _buttons=0;
-    uint8_t keyboard[9],mouse[7]; irb_hid_keyboard(_keys,keyboard); irb_hid_mouse(0,0,mouse);
+    memset(_keys,0,sizeof(_keys));
+    uint8_t keyboard[9],mouse[7]; irb_hid_keyboard(_keys,keyboard); irb_hid_mouse(0,0,0,0,mouse);
     if(![self submit:keyboard length:sizeof(keyboard)]||![self submit:mouse length:sizeof(mouse)]) { [self stop]; return NO; }
     _error=nil; return YES;
 }
@@ -109,52 +105,39 @@ typedef int32_t (*ObjectRelease)(uint32_t);
     if(![self submit:report length:sizeof(report)]) { _keys[usage]=old; return NO; }
     ++_keyboardReports; return YES;
 }
-- (BOOL)mouseX:(double)x y:(double)y buttons:(uint8_t)buttons wheel:(int8_t)wheel {
-    uint8_t position[5],mouse[7];
-    if(buttons>31||!irb_hid_position(x,y,position)) return NO;
-    // Hover must produce only absolute motion. Repeated zero-relative reports
-    // switch the system's active pointer source after every absolute update.
-    irb_hid_mouse(buttons,wheel,mouse);
-    if(![self submit:position length:sizeof(position)]) return NO;
-    if(buttons!=_buttons||wheel) {
-        if(![self submit:mouse length:sizeof(mouse)]) return NO;
-        _buttons=buttons; ++_relativeReports;
-    }
-    ++_pointerReports; return YES;
+- (BOOL)mouseDX:(int16_t)dx dy:(int16_t)dy buttons:(uint8_t)buttons wheel:(int8_t)wheel {
+    if(buttons>31||dx==INT16_MIN||dy==INT16_MIN) return NO;
+    uint8_t mouse[7]; irb_hid_mouse(dx,dy,buttons,wheel,mouse);
+    if(![self submit:mouse length:sizeof(mouse)]) return NO;
+    ++_pointerReports; ++_relativeReports; return YES;
 }
 - (NSDictionary *)diagnostics {
     NSMutableArray *ids=[NSMutableArray new];
-    id edgeRemoval=NSNull.null;
-    CFTypeRef (*property)(uint32_t,CFStringRef,CFAllocatorRef,uint32_t)=_iokit?dlsym(_iokit,"IORegistryEntryCreateCFProperty"):NULL;
     for(unsigned i=0;i<IRB_HID_DEVICE_COUNT;++i) {
         uint64_t registry=0;
         if(_devices[i]&&_copyService&&_registryID&&_objectRelease) {
             uint32_t service=_copyService(_devices[i]);
             if(service) {
                 _registryID(service,&registry);
-                if(i==IRB_HID_POSITION&&property) {
-                    CFTypeRef value=property(service,CFSTR("AbsoluteAxisBoundsRemovalPercentage"),NULL,0);
-                    if(value) edgeRemoval=CFBridgingRelease(value);
-                }
                 _objectRelease(service);
             }
         }
         [ids addObject:@(registry)];
     }
     return @{@"backend":@"IOHIDUserDevice",@"native_hid_active":IRBBool(self.active),
-        @"registry_entry_id":ids[IRB_HID_POSITION],@"registry_entry_ids":ids,
-        @"absolute_axis_edge_removal_percent":edgeRemoval,@"relative_reports":@(_relativeReports),
+        @"registry_entry_id":ids[IRB_HID_MOUSE],@"registry_entry_ids":ids,
+        @"pointer_mode":@"relative",@"relative_reports":@(_relativeReports),
         @"creation_probe":_creationProbe?:@{},
         @"keyboard_reports":@(_keyboardReports),@"pointer_reports":@(_pointerReports)};
 }
 - (void)stop {
     NSString *savedError=_error;
     memset(_keys,0,sizeof(_keys)); uint8_t keyboard[9],mouse[7];
-    irb_hid_keyboard(_keys,keyboard); irb_hid_mouse(0,0,mouse);
+    irb_hid_keyboard(_keys,keyboard); irb_hid_mouse(0,0,0,0,mouse);
     if(_devices[IRB_HID_KEYBOARD]) [self submit:keyboard length:sizeof(keyboard)];
     if(_devices[IRB_HID_MOUSE]) [self submit:mouse length:sizeof(mouse)];
     for(unsigned i=0;i<IRB_HID_DEVICE_COUNT;++i) if(_devices[i]) { CFRelease(_devices[i]); _devices[i]=NULL; }
-    _buttons=0; _error=savedError;
+    _error=savedError;
 }
 - (void)dealloc { [self stop]; }
 @end

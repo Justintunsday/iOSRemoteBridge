@@ -4,6 +4,7 @@
 #include "BufferedRenderer.h"
 #include "D3DRenderer.h"
 #include "HIDKeyMap.h"
+#include "MouseMotion.h"
 #include "ExperimentalFSR.h"
 #include <windowsx.h>
 #include <commdlg.h>
@@ -45,7 +46,8 @@ std::wstring status;
 std::string responseNotice;
 std::wstring lastRenderNotice;
 std::set<uint16_t> heldKeys;
-bool keyboardApproved=false,keyboardPending=false,pointerDirty=false;
+bool keyboardApproved=false,keyboardPending=false,mouseCaptured=false,rawMouseReady=false;
+MouseMotion mouseMotion;
 uint8_t mouseButtons=0;
 int wheelRemainder=0;
 uint64_t connectionEpoch=0;
@@ -154,13 +156,41 @@ bool releaseHeldKeys() {
         if(!connection->command({{"op","key_event"},{"usage",usage},{"down",false}})) ok=false;
     return ok;
 }
-bool sendSystemPointer(int wheel=0) {
-    pointerDirty=false;
-    return command({{"op","mouse_event"},{"x",lastX},{"y",lastY},{"buttons",mouseButtons},{"wheel",wheel}});
+void disconnect();
+bool sendSystemMouse(int wheel=0) {
+    auto delta=mouseMotion.take();
+    return command({{"op","mouse_delta"},{"dx",delta.first},{"dy",delta.second},{"buttons",mouseButtons},{"wheel",wheel}});
+}
+void stopMouseCapture() {
+    bool captured=mouseCaptured; mouseCaptured=false; mouseMotion.clear(); wheelRemainder=0;
+    if(captured) { ClipCursor(nullptr); if(GetCapture()==window) ReleaseCapture(); SetCursor(LoadCursor(nullptr,IDC_ARROW)); }
+    if(mouseButtons) { mouseButtons=0; if(keyboardApproved) sendSystemMouse(); }
+    if(keyboardApproved) SetWindowTextW(shortcutHint,L"Click video to capture mouse");
+}
+void startMouseCapture() {
+    if(mouseCaptured||!keyboardApproved||!rawMouseReady||videoRect.right<=videoRect.left||videoRect.bottom<=videoRect.top) return;
+    RECT bounds=videoRect; MapWindowPoints(window,nullptr,reinterpret_cast<POINT *>(&bounds),2);
+    if(!ClipCursor(&bounds)) { SetWindowTextW(notice,L"Cannot capture mouse; focus the viewer and click the video."); return; }
+    mouseMotion.clear(); mouseButtons=0; wheelRemainder=0; mouseCaptured=true;
+    SetCapture(window); SetCursor(nullptr); SetWindowTextW(shortcutHint,L"F10 releases the mouse");
+}
+void rawMouse(const RAWMOUSE &mouse) {
+    if(!keyboardApproved||!mouseCaptured||keyboardPending) return;
+    if(!(mouse.usFlags&MOUSE_MOVE_ABSOLUTE)) mouseMotion.add(mouse.lLastX,mouse.lLastY,presentedRotation);
+    USHORT flags=mouse.usButtonFlags;
+    const USHORT downs[]={RI_MOUSE_LEFT_BUTTON_DOWN,RI_MOUSE_RIGHT_BUTTON_DOWN,RI_MOUSE_MIDDLE_BUTTON_DOWN,RI_MOUSE_BUTTON_4_DOWN,RI_MOUSE_BUTTON_5_DOWN};
+    const USHORT ups[]={RI_MOUSE_LEFT_BUTTON_UP,RI_MOUSE_RIGHT_BUTTON_UP,RI_MOUSE_MIDDLE_BUTTON_UP,RI_MOUSE_BUTTON_4_UP,RI_MOUSE_BUTTON_5_UP};
+    bool changed=false;
+    for(unsigned i=0;i<5;++i) {
+        if(flags&downs[i]) { mouseButtons|=static_cast<uint8_t>(1u<<i); changed=true; }
+        if(flags&ups[i]) { mouseButtons&=static_cast<uint8_t>(~(1u<<i)); changed=true; }
+    }
+    if(flags&RI_MOUSE_WHEEL) wheelRemainder+=static_cast<SHORT>(mouse.usButtonData);
+    int wheel=std::clamp(wheelRemainder/WHEEL_DELTA,-127,127); wheelRemainder-=wheel*WHEEL_DELTA;
+    if((changed||wheel)&&!sendSystemMouse(wheel)) disconnect();
 }
 void endDrag() {
-    if(mouseButtons) { mouseButtons=0; if(keyboardApproved) sendSystemPointer(); ReleaseCapture(); }
-    pointerDirty=false;
+    stopMouseCapture();
     if(dragging) { command({{"op","touch"},{"finger",0},{"phase",2},{"x",lastX},{"y",lastY}}); dragging=false; ReleaseCapture(); }
 }
 void fitWindow() {
@@ -224,7 +254,7 @@ void constrainSize(HWND hwnd,UINT edge,RECT &rect) {
 void disconnect() {
     releaseHeldKeys(); endDrag(); ++connectionEpoch;
     keyboardApproved=keyboardPending=false; KillTimer(window,KeyboardTimer); KillTimer(window,PointerTimer);
-    pointerDirty=false; wheelRemainder=0;
+    mouseMotion.clear(); wheelRemainder=0;
     SendMessageW(keyboardCheck,BM_SETCHECK,BST_UNCHECKED,0); EnableWindow(keyboardCheck,TRUE);
     if(connection) connection->close(); connection.reset();
     { std::lock_guard<std::mutex> lock(frameMutex); frame.reset(); }
@@ -267,6 +297,7 @@ void connectClient() {
     } catch(const std::exception &) { SetWindowTextW(notice,L"Cannot load pairing file or configuration. Check the local JSON file and required fields."); connection.reset(); }
 }
 void toggleKeyboardMode() {
+    if(!rawMouseReady) { SetWindowTextW(notice,L"Raw mouse input unavailable on this Windows session."); return; }
     if(keyboardPending) { SetWindowTextW(notice,L"Switching system mouse and keyboard mode..."); return; }
     if(!connection||!connection->authorized()) {
         SendMessageW(keyboardCheck,BM_SETCHECK,BST_UNCHECKED,0);
@@ -309,6 +340,7 @@ bool point(LPARAM position,double &x,double &y) {
 }
 LRESULT CALLBACK videoProcedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
     if(message==WM_ERASEBKGND) return 1;
+    if(message==WM_SETCURSOR&&mouseCaptured) { SetCursor(nullptr); return TRUE; }
     if(message==WM_LBUTTONDOWN||message==WM_LBUTTONUP||message==WM_RBUTTONDOWN||message==WM_RBUTTONUP||message==WM_MBUTTONDOWN||message==WM_MBUTTONUP||message==WM_MOUSEMOVE) {
         POINT p{GET_X_LPARAM(l),GET_Y_LPARAM(l)}; MapWindowPoints(hwnd,window,&p,1);
         return SendMessageW(window,message,w,MAKELPARAM(p.x,p.y));
@@ -370,6 +402,14 @@ LRESULT CALLBACK videoProcedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
 }
 LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
     switch(message) {
+    case WM_INPUT: {
+        UINT bytes=sizeof(RAWINPUT); RAWINPUT input{};
+        if(GetRawInputData(reinterpret_cast<HRAWINPUT>(l),RID_INPUT,&input,&bytes,sizeof(RAWINPUTHEADER))!=static_cast<UINT>(-1)&&
+           bytes>=sizeof(RAWINPUTHEADER)+sizeof(RAWMOUSE)&&input.header.dwType==RIM_TYPEMOUSE) rawMouse(input.data.mouse);
+        return DefWindowProcW(hwnd,message,w,l);
+    }
+    case WM_SETCURSOR: if(mouseCaptured) { SetCursor(nullptr); return TRUE; } break;
+
     case WM_CREATE:
         window=hwnd;
         configEdit=control(L"EDIT",L"client-config.json",WS_BORDER|ES_AUTOHSCROLL,8,8,410,25,Config);
@@ -501,8 +541,8 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
     case WM_KILLFOCUS: endDrag(); if(!releaseHeldKeys()) disconnect(); return 0;
     case WM_ACTIVATEAPP: if(!w) { endDrag(); if(!releaseHeldKeys()) disconnect(); } break;
     case WM_TIMER:
-        if(w==PointerTimer&&keyboardApproved&&pointerDirty) {
-            if(!sendSystemPointer()) disconnect(); return 0;
+        if(w==PointerTimer&&keyboardApproved&&mouseCaptured&&mouseMotion.pending()) {
+            if(!sendSystemMouse()) disconnect(); return 0;
         }
         if(w==KeyboardTimer&&keyboardPending) {
             keyboardPending=keyboardApproved=false; SendMessageW(keyboardCheck,BM_SETCHECK,BST_UNCHECKED,0);
@@ -514,15 +554,10 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
     case WM_LBUTTONDOWN: case WM_LBUTTONUP: {
         bool down=message==WM_LBUTTONDOWN||message==WM_RBUTTONDOWN||message==WM_MBUTTONDOWN;
         if(keyboardApproved) {
-            double x,y; bool inside=point(l,x,y);
-            if(down&&!inside) break;
-            if(inside) { lastX=x; lastY=y; }
-            uint8_t mask=(message==WM_LBUTTONDOWN||message==WM_LBUTTONUP)?1:
-                         (message==WM_RBUTTONDOWN||message==WM_RBUTTONUP)?2:4;
-            if(down) { SetFocus(hwnd); mouseButtons|=mask; SetCapture(hwnd); }
-            else mouseButtons&=static_cast<uint8_t>(~mask);
-            if(!sendSystemPointer()) { disconnect(); return 0; }
-            if(!mouseButtons) ReleaseCapture(); return 0;
+            if(mouseCaptured) return 0; // Raw Input owns native button edges.
+            double x,y;
+            if(down&&point(l,x,y)) { SetFocus(hwnd); startMouseCapture(); }
+            return 0;
         }
         if(message==WM_LBUTTONUP) { endDrag(); return 0; }
         if(message!=WM_LBUTTONDOWN) break;
@@ -533,27 +568,16 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         } return 0;
     }
     case WM_MOUSEMOVE:
-        if(keyboardApproved) {
-            double x,y;
-            if(point(l,x,y)) { lastX=x; lastY=y; pointerDirty=true; }
-            return 0;
-        }
+        if(keyboardApproved) return 0; // Relative motion comes only from WM_INPUT.
         if(dragging) { double x,y; if(point(l,x,y)) {
             lastX=x; lastY=y; ULONGLONG now=GetTickCount64();
             if(now-lastMove>=8) { lastMove=now; command({{"op","touch"},{"finger",0},{"phase",1},{"x",x},{"y",y}}); }
         } } return 0;
-    case WM_CAPTURECHANGED: if(dragging||mouseButtons) endDrag(); return 0;
+    case WM_CAPTURECHANGED: if(dragging||mouseCaptured) endDrag(); return 0;
     case WM_MOUSEWHEEL: {
         POINT p{GET_X_LPARAM(l),GET_Y_LPARAM(l)}; ScreenToClient(hwnd,&p);
         if(PtInRect(&videoRect,p)) {
-            if(keyboardApproved) {
-                double x,y;
-                if(point(MAKELPARAM(p.x,p.y),x,y)) { lastX=x; lastY=y; }
-                wheelRemainder+=GET_WHEEL_DELTA_WPARAM(w);
-                int steps=std::clamp(wheelRemainder/WHEEL_DELTA,-127,127);
-                wheelRemainder-=steps*WHEEL_DELTA;
-                if(steps&&!sendSystemPointer(steps)) disconnect();
-            } else scrollGesture(GET_WHEEL_DELTA_WPARAM(w)<0);
+            if(!keyboardApproved) scrollGesture(GET_WHEEL_DELTA_WPARAM(w)<0);
             return 0;
         } break;
     }
@@ -597,11 +621,11 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
     case KeyboardModeMessage:
         if(static_cast<uint64_t>(w)==connectionEpoch) {
             keyboardApproved=l!=0; keyboardPending=false; heldKeys.clear(); KillTimer(hwnd,KeyboardTimer);
-            mouseButtons=0; pointerDirty=false; wheelRemainder=0; KillTimer(hwnd,PointerTimer);
+            stopMouseCapture(); mouseButtons=0; mouseMotion.clear(); wheelRemainder=0; KillTimer(hwnd,PointerTimer);
             if(keyboardApproved) SetTimer(hwnd,PointerTimer,16,nullptr);
             SendMessageW(keyboardCheck,BM_SETCHECK,keyboardApproved?BST_CHECKED:BST_UNCHECKED,0); EnableWindow(keyboardCheck,TRUE);
-            SetWindowTextW(shortcutHint,keyboardApproved?L"iOS system HID active":L"H Home / C Control");
-            if(keyboardApproved) SetFocus(hwnd);
+            SetWindowTextW(shortcutHint,keyboardApproved?L"Click video to capture mouse":L"H Home / C Control");
+            if(keyboardApproved) { SetFocus(hwnd); startMouseCapture(); }
             lastRenderNotice.clear();
         } return 0;
     case WM_ENTERSIZEMOVE: endDrag(); GetWindowRect(hwnd,&sizingStart); return 0;
@@ -623,7 +647,7 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         EndPaint(hwnd,&paint); return 0;
     }
     case WM_CLOSE: disconnect(); DestroyWindow(hwnd); return 0;
-    case WM_DESTROY: experimentalRenderer.reset(); gpuRenderer.reset(); renderer.reset(); PostQuitMessage(0); return 0;
+    case WM_DESTROY: stopMouseCapture(); experimentalRenderer.reset(); gpuRenderer.reset(); renderer.reset(); PostQuitMessage(0); return 0;
     }
     return DefWindowProcW(hwnd,message,w,l);
 }
@@ -642,6 +666,8 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int show) {
     HWND hwnd=CreateWindowW(cls.lpszClassName,L"iOSRemoteBridge - pair and connect",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,
                            CW_USEDEFAULT,CW_USEDEFAULT,460,950,nullptr,nullptr,instance,nullptr);
     if(!hwnd) { WSACleanup(); return 1; }
+    RAWINPUTDEVICE rawDevice{1,2,0,hwnd};
+    rawMouseReady=RegisterRawInputDevices(&rawDevice,1,sizeof(rawDevice))!=FALSE;
     int argc=0; auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);
     if(argv&&argc>1&&std::wstring(argv[1])==L"--self-test-ui") {
         bool controls=GetDlgItem(hwnd,Config)&&GetDlgItem(hwnd,Connect)&&GetDlgItem(hwnd,Disconnect)&&
