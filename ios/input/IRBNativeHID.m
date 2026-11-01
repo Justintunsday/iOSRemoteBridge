@@ -1,6 +1,7 @@
 #import "IRBNativeHID.h"
 #import "../common/IRBCommon.h"
 #import <dlfcn.h>
+#import <mach/mach.h>
 #include "../../shared/irb_hid_reports.h"
 typedef CFTypeRef HIDDevice;
 typedef HIDDevice (*HIDCreate)(CFAllocatorRef,CFDictionaryRef);
@@ -18,12 +19,15 @@ typedef int32_t (*ObjectRelease)(uint32_t);
     uint8_t _keys[256];
     uint64_t _keyboardReports,_pointerReports;
     NSString *_error;
+    void *_iokit;
+    NSDictionary *_creationProbe;
 }
 - (instancetype)init {
     if((self=[super init])) {
         void *h=dlopen("/System/Library/Frameworks/IOKit.framework/IOKit",RTLD_NOW);
         if(!h) h=dlopen("/System/Library/PrivateFrameworks/IOKit.framework/IOKit",RTLD_NOW);
         if(h) {
+            _iokit=h;
             _create=(HIDCreate)dlsym(h,"IOHIDUserDeviceCreate"); _report=(HIDReport)dlsym(h,"IOHIDUserDeviceHandleReport");
             _copyService=(HIDService)dlsym(h,"IOHIDUserDeviceCopyService");
             _registryID=(RegistryID)dlsym(h,"IORegistryEntryGetRegistryEntryID");
@@ -34,6 +38,34 @@ typedef int32_t (*ObjectRelease)(uint32_t);
 }
 - (BOOL)active { return _device!=NULL; }
 - (NSString *)error { return _error; }
+- (void)probeCreationFailure {
+    NSMutableDictionary *probe=[NSMutableDictionary new];
+    CFMutableDictionaryRef (*matching)(const char *)=dlsym(_iokit,"IOServiceMatching");
+    uint32_t (*find)(uint32_t,CFDictionaryRef)=dlsym(_iokit,"IOServiceGetMatchingService");
+    int32_t (*openService)(uint32_t,uint32_t,uint32_t,uint32_t *)=dlsym(_iokit,"IOServiceOpen");
+    int32_t (*closeService)(uint32_t)=dlsym(_iokit,"IOServiceClose");
+    if(matching&&find&&openService&&closeService&&_objectRelease) {
+        uint32_t service=find(0,matching("IOHIDResource")),connection=0;
+        probe[@"resource_found"]=IRBBool(service!=0);
+        if(service) {
+            int32_t code=openService(service,mach_task_self(),0,&connection);
+            probe[@"open_result"]=[NSString stringWithFormat:@"0x%08x",(unsigned)code];
+            if(connection) closeService(connection); _objectRelease(service);
+        }
+    }
+    void *security=dlopen("/System/Library/Frameworks/Security.framework/Security",RTLD_NOW);
+    CFTypeRef (*taskCreate)(CFAllocatorRef)=security?dlsym(security,"SecTaskCreateFromSelf"):NULL;
+    CFTypeRef (*entitlement)(CFTypeRef,CFStringRef,CFErrorRef *)=security?dlsym(security,"SecTaskCopyValueForEntitlement"):NULL;
+    if(taskCreate&&entitlement) {
+        CFTypeRef task=taskCreate(NULL);
+        if(task) {
+            CFTypeRef value=entitlement(task,CFSTR("com.apple.hid.manager.user-access-device"),NULL);
+            probe[@"runtime_hid_entitlement"]=IRBBool(value&&CFEqual(value,kCFBooleanTrue));
+            if(value) CFRelease(value); CFRelease(task);
+        }
+    }
+    _creationProbe=probe;
+}
 - (BOOL)submit:(const uint8_t *)report length:(CFIndex)length {
     if(!_device||!_report) { _error=@"native HID mode is disabled"; return NO; }
     int32_t result=_report(_device,report,length);
@@ -48,7 +80,10 @@ typedef int32_t (*ObjectRelease)(uint32_t);
         @"Transport":@"Virtual",@"VendorID":@0x1209,@"ProductID":@0x4952,
         @"ReportInterval":@8000};
     _device=_create(kCFAllocatorDefault,(__bridge CFDictionaryRef)properties);
-    if(!_device) { _error=@"IOHIDUserDeviceCreate failed; check daemon HID entitlement and jailbreak signing"; return NO; }
+    if(!_device) {
+        [self probeCreationFailure];
+        _error=[NSString stringWithFormat:@"IOHIDUserDeviceCreate failed (%@)",_creationProbe]; return NO;
+    }
     memset(_keys,0,sizeof(_keys));
     uint8_t keyboard[9],mouse[7]; irb_hid_keyboard(_keys,keyboard); irb_hid_mouse(0,0,mouse);
     if(![self submit:keyboard length:sizeof(keyboard)]||![self submit:mouse length:sizeof(mouse)]) { [self stop]; return NO; }
@@ -77,6 +112,7 @@ typedef int32_t (*ObjectRelease)(uint32_t);
     }
     return @{@"backend":@"IOHIDUserDevice",@"native_hid_active":IRBBool(self.active),
         @"registry_entry_id":@(registry),
+        @"creation_probe":_creationProbe?:@{},
         @"keyboard_reports":@(_keyboardReports),@"pointer_reports":@(_pointerReports)};
 }
 - (void)stop {
