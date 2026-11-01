@@ -222,6 +222,54 @@ approved on the phone; no Windows binary change was needed. The owner confirmed
 **"已消失，画面正常"** (the button is gone and the picture is normal).
 Earlier STOP-button observations above describe previous versions.
 
+## GPU display, experimental FSR and keyboard controls
+
+Windows source `37e675900856c306a03275f787a148de7bca5434` passed
+[build 41315862947](https://github.com/Justintunsday/iOSRemoteBridge/actions/runs/41315862947),
+including seven CTest checks, GUI toolbar/aspect/input-map checks, TLS/actions
+and encoded color checks. The package includes D3D11 VSync/FSR 1 presentation,
+F9 toolbar hiding, H/C/volume/swipe shortcuts, F10 live-keyboard mode, and an
+off-by-default single-frame SDK FSR experiment with provider selection.
+
+On this PC's Radeon RX 6650 XT, the D3D11 hardware diagnostic passed native
+grayscale range, flat color, EASU-vs-bilinear output, RCAS, resizing, letterboxing
+and Present interval 0/1 calls. This does not measure physical monitor scanout.
+The signed AMD SDK 2.4 runtime enumerated 4.1.2, 3.1.6 and 2.3.4. All three
+produced synthetic output with zero RGB error at the sampled center of a flat
+color image. Each experiment resets history and supplies a flat depth plane,
+zero motion and fixed exposure, with explicit linear/sRGB conversion.
+
+| Provider | Synthetic input/output | Mean conversion/upload/GPU/readback time |
+| --- | --- | --- |
+| 4.1.2 | 128x128 to 256x256 | 4.63 ms |
+| 4.1.2 | 375x667 to 750x1334 | 33.71 ms |
+| 3.1.6 | 375x667 to 750x1334 | 42.81 ms |
+| 2.3.4 | 375x667 to 750x1334 | 40.72 ms |
+
+Each mean uses 12 warm calls after context setup. The 4.1.2 runs used the
+`c506fec`/`e59d9fc` diagnostic builds; 3.1.6/2.3.4 used the final `37e6759`
+build. Background desktop/viewer load was not controlled. These short flat-image
+samples are not a provider ranking, real-content benchmark, GPU timestamp-only
+timing or display latency. They exceed the 16.67-ms 60-FPS budget at phone-sized
+output, so the experiment remains off by default. The notice separately reports
+draw calls per second; the title continues to report decoded FPS.
+
+The phone package at `b2334d003881daaf7948d2a835bb80dd7d64579c`, from
+[iOS build 41316797986](https://github.com/Justintunsday/iOSRemoteBridge/actions/runs/41316797986),
+was installed and SpringBoard reloaded once. It adds guarded Control Center
+navigation and a separately approved session-scoped keyboard grant. Approval
+windows release existing keys/contacts before taking focus; an already-released
+key-up is a no-op. The same revision passed
+[portable tests 41316797961](https://github.com/Justintunsday/iOSRemoteBridge/actions/runs/41316797961).
+Windows source is unchanged from `37e6759`.
+
+The updated viewer reconnected after local approval. A read-only desktop
+observation showed the live Home Screen, all toolbar controls hidden, no red
+floating button and a 58.9 decoded-FPS D3D11VA title reading. Asked to try H, C,
+volume, swipes and F10-approved typing, the owner replied **"完成"** (completed).
+There was no separate instrumented per-shortcut delivery trace. Broader input,
+real-content experimental-FSR quality and long-duration tests remain outstanding.
+
 ## Remaining validation
 
 Check longer Windows input/reconnect sessions, broader cross-app capture,
