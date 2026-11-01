@@ -226,7 +226,10 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
     }
 }
 - (void)fromBridge:(irb_header)h data:(NSData *)data {
-    if(h.type==IRB_STOP) { [self disconnect:@"session stopped on iPhone"]; _cooldown=IRBNow()+30000000; return; }
+    if(h.type==IRB_STOP) {
+        NSDictionary *stop=IRBDictionary(data); NSString *reason=[stop[@"reason"] isKindOfClass:NSString.class]?stop[@"reason"]:@"session stopped on iPhone";
+        [self disconnect:reason]; _cooldown=IRBNow()+30000000; return;
+    }
     if(!_authenticated) return;
     if(h.type==IRB_RESPONSE) {
         NSDictionary *r=IRBDictionary(data);

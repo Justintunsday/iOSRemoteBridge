@@ -35,6 +35,14 @@
     dispatch_source_t _gesture;
     NSDictionary *_pendingConfiguration;
 }
+- (void)status:(NSString *)state extra:(NSDictionary *)extra {
+    NSMutableDictionary *result=[@{@"state":state,@"updated":@([NSDate.date timeIntervalSince1970]),
+        @"scene_count":@(UIApplication.sharedApplication.connectedScenes.count),@"locked":@([self locked])} mutableCopy];
+    if(extra) [result addEntriesFromDictionary:extra];
+    NSString *path=IRB_DIRECTORY @"/bridge-status.json";
+    [IRBJSON(result) writeToFile:path atomically:YES];
+    [NSFileManager.defaultManager setAttributes:@{NSFilePosixPermissions:@0600} ofItemAtPath:path error:NULL];
+}
 - (BOOL)locked {
     Class cls=NSClassFromString(@"SBLockScreenManager");
     SEL shared=NSSelectorFromString(@"sharedInstance"), locked=NSSelectorFromString(@"isUILocked");
@@ -45,6 +53,7 @@
 }
 - (void)start {
     _input=[IRBInput new];
+    [self status:@"loaded" extra:@{@"input_status":_input.status}];
     [NSTimer scheduledTimerWithTimeInterval:3 repeats:YES block:^(NSTimer *timer) {
         (void)timer; [self connect];
         if(self->_approved&&([self locked]||IRBNow()>self->_deadline)) [self stopSession:@"locked or session expired"];
@@ -75,10 +84,18 @@
     [self send:out];
 }
 - (void)prompt:(NSString *)message decision:(void(^)(BOOL))decision {
-    if(_confirming||[self locked]) { decision(NO); return; }
+    if(_confirming||[self locked]) { [self status:@"approval_unavailable" extra:@{}]; decision(NO); return; }
     _confirming=YES;
     _previousWindow=UIApplication.sharedApplication.keyWindow;
-    if(!_window) _window=[[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    if(!_window) {
+        UIWindowScene *selected=nil;
+        for(UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+            if(![scene isKindOfClass:UIWindowScene.class]) continue;
+            if(scene.activationState==UISceneActivationStateForegroundActive) { selected=(UIWindowScene *)scene; break; }
+            if(!selected) selected=(UIWindowScene *)scene;
+        }
+        _window=selected?[[UIWindow alloc] initWithWindowScene:selected]:[[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    }
     _window.frame=UIScreen.mainScreen.bounds; _window.windowLevel=UIWindowLevelAlert+20;
     _window.rootViewController=[UIViewController new];
     _window.rootViewController.view.backgroundColor=[UIColor colorWithWhite:0 alpha:.15];
@@ -89,12 +106,20 @@
     void(^finish)(BOOL)=^(BOOL allow) {
         if(generation!=self->_generation) return;
         self->_confirming=NO; [self->_previousWindow makeKeyWindow];
+        [self status:allow?@"owner_allowed":@"owner_declined_or_timed_out" extra:@{}];
         self->_window.hidden=YES; decision(allow);
         if(self->_approved) [self showIndicator];
     };
     [alert addAction:[UIAlertAction actionWithTitle:@"Reject" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a) { (void)a; finish(NO); }]];
     [alert addAction:[UIAlertAction actionWithTitle:@"Allow" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) { (void)a; finish(YES); }]];
-    [_window.rootViewController presentViewController:alert animated:YES completion:nil];
+    [self status:@"approval_window_created" extra:@{@"has_window_scene":@(_window.windowScene!=nil),
+          @"is_key":@(_window.isKeyWindow),@"hidden":@(_window.hidden)}];
+    dispatch_async(dispatch_get_main_queue(),^{
+        if(generation!=self->_generation||!self->_confirming) return;
+        [self->_window.rootViewController presentViewController:alert animated:YES completion:^{
+            [self status:@"approval_presented" extra:@{}];
+        }];
+    });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,45*NSEC_PER_SEC),dispatch_get_main_queue(),^{
         if(self->_confirming&&generation==self->_generation) {
             [alert dismissViewControllerAnimated:NO completion:nil]; finish(NO);
@@ -116,6 +141,7 @@
 - (void)ownerStop { [self stopSession:@"stopped by device owner"]; }
 - (void)stopSession:(NSString *)reason {
     BOOL was=_approved||_confirming;
+    [self status:@"stopped" extra:@{@"reason":reason}];
     _approved=NO; _confirming=NO; ++_generation;
     [_display invalidate]; _display=nil;
     if(_gesture) { dispatch_source_cancel(_gesture); _gesture=nil; }
@@ -154,6 +180,7 @@
     _display=[CADisplayLink displayLinkWithTarget:self selector:@selector(tick:)];
     _display.preferredFramesPerSecond=_fps;
     [_display addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+    [self status:@"streaming" extra:[self info]];
     return YES;
 }
 - (void)tick:(CADisplayLink *)link {
