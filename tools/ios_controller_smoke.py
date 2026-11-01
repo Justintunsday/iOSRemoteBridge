@@ -35,7 +35,7 @@ def warmup():
 def diagnostics():
     for arguments,name in [
         (('io',SIMULATOR,'screenshot',str(LOGS/'controller-failure.png')),'controller-failure-screenshot.log'),
-        (('spawn',SIMULATOR,'log','show','--last','3m','--predicate',f'process == "iOSRemoteBridge"'),'controller-failure-system.log')]:
+        (('spawn',SIMULATOR,'log','show','--info','--last','3m','--predicate',f'eventMessage CONTAINS "{BUNDLE}" OR process == "iOSRemoteBridge"'),'controller-failure-system.log')]:
         try:
             output=sim(*arguments,check=False,timeout=25)
             (LOGS/name).write_text((output.stdout+'\n'+output.stderr)[-200000:])

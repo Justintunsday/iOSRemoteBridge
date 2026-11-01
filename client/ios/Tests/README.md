@@ -7,7 +7,7 @@ foundation_tests.m compiles the production Objective-C profile, wire parser and
 Annex-B parser on macOS. The simulator driver is compiled only for Simulator;
 the device IPA contains no test-profile loader or automatic test actions.
 
-Simulator.entitlements supplies a synthetic app identity to the simulator's
-ad-hoc code signature so Keychain operations are tested rather than skipped.
+Simulator.entitlements supplies a synthetic app identity through Xcode's normal
+simulator entitlement packaging so Keychain operations are tested rather than skipped.
 It is never used to sign the device IPA; AltStore / Sideloadly supplies the
 device's actual signing identity and corresponding app Keychain access.
