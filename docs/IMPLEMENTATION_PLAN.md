@@ -20,3 +20,19 @@ string or a successful CI build.
 Performance priorities: stability, system-wide compatibility, latency, native
 resolution, 60 FPS, automation. Audio, WebRTC, HEVC and accessibility trees may
 be deferred when the first implementation cannot validate them reliably.
+
+## Current status
+
+| Phase | Source/build progress | Physical evidence |
+| --- | --- | --- |
+| Research/repository | Private repo, pinned analysis, notices, feature branches and CI | Exact target not inspected |
+| Capture | IOSurface pool, CARenderServer producer and GPU scaling; .deb compiles | Pixels, cross-app capture and rotation unverified |
+| Video | VideoToolbox H.264, IDRs, bounded queues, adaptation and recovery | Hardware use, FPS, latency, power and heat unmeasured |
+| Input | HID contact state, gestures, paced ASCII, keys/buttons and launch | Delivery remains experimental |
+| Windows | Native receiver, decoding, input, metrics and CI harness | Check actual native CI; phone pairing not tested |
+| Automation | Python, JSON-lines and MCP; simulator/security tests pass | No physical agent-to-iPhone session |
+| Reliability | Consent/lock checks, cancellation, thermal pacing and launchd recovery | Soak/reboot/respring tests pending |
+
+No release/tag is published by this ledger. The manual release workflow creates
+only a draft from successful real artifacts for the same main commit. Publish
+a milestone only when its functionality and evidence have been reviewed.

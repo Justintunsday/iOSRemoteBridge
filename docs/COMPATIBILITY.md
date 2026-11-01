@@ -16,3 +16,13 @@ coordinate correctness, input delivery or target-device performance.
 
 ScreenCaptureKit is **not a capture backend for iOS 16.1.1**. Check deployment
 availability, not just the platform list in current Apple documentation.
+
+The recorded macos-15 builds selected Xcode 16.4 / iPhoneOS 18.5 SDK, deploying
+at iOS 16.1. Logs inspect arm64/arm64e slices and rootless file layout. This
+newer SDK does not establish target runtime availability. Public API availability
+is checked against 16.1; private symbols/selectors are dynamically resolved and
+need exact-device verification.
+
+Python 3.11+ is the project target; the optional MCP SDK is pinned to 2.3.0.
+The standard CLI needs no external library. Generic MCP discovery/routing and
+real stdio startup are tested; host-to-physical-iPhone integration is not.

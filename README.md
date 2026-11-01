@@ -3,10 +3,73 @@
 High-performance iOS jailbreak remote desktop and AI automation with
 hardware-accelerated video streaming and system-wide input control.
 
-Work in progress for iPhone SE 2 / iOS 16.1.1 / Dopamine rootless. This is an
-experimental prototype, not a device-verified release. Original code is MIT.
+[![iOS package](https://github.com/Justintunsday/iOSRemoteBridge/actions/workflows/build-ios.yml/badge.svg?branch=main)](https://github.com/Justintunsday/iOSRemoteBridge/actions/workflows/build-ios.yml)
+[![Windows client](https://github.com/Justintunsday/iOSRemoteBridge/actions/workflows/build-client.yml/badge.svg?branch=main)](https://github.com/Justintunsday/iOSRemoteBridge/actions/workflows/build-client.yml)
+[![Tests](https://github.com/Justintunsday/iOSRemoteBridge/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/Justintunsday/iOSRemoteBridge/actions/workflows/tests.yml)
 
-See [the implementation ledger](docs/IMPLEMENTATION_PLAN.md) and
-[compatibility evidence](docs/COMPATIBILITY.md). Source, research and CI results
-are developed in feature branches and preserved in this private repository.
-High-performance iOS jailbreak remote desktop and AI automation with hardware-accelerated video streaming and system-wide input control.
+**Experimental supervised prototype. Physical compatibility with iPhone SE 2,
+iOS 16.1.1, Dopamine and ElleKit is not verified yet. No target-device FPS,
+latency, thermal or battery result is claimed.** A successful build does not
+prove that private capture or HID APIs work on that device.
+
+## Implemented
+
+- Rootless .deb containing a mobile LaunchDaemon and a SpringBoard-only library.
+- Bounded IOSurface-backed capture, native rendering/GPU scaling requests,
+  VideoToolbox H.264, IDR recovery, 30/60-FPS pacing and bitrate adaptation.
+- Pinned TLS, random pairing tokens, physical owner approval, active-session
+  STOP control, lock/expiry shutdown and extra confirmation for sensitive input.
+- System-HID multi-contact API, gestures, paced US-layout ASCII text, keyboard
+  presses, Home/App Switcher, volume and experimental app launch.
+- Native Win32 receiver with D3D11VA selection/software fallback, mouse/text
+  control, rotation, quality controls, reconnect and FPS/RTT/decode statistics.
+- Python API/CLI, JSON-lines adapter and optional standard MCP stdio tools.
+- GitHub Actions builds, TLS/H.264 simulator tests, validation, logs/artifacts
+  and a manually gated draft-release workflow.
+
+These UI/private-API paths still need on-device verification. There is one
+approved session at a time. The transport is TLS/TCP with frame credit, not
+Sunshine/Moonlight protocol compatibility. HEVC, audio, WebRTC, automatic app
+orientation, arbitrary Unicode, UI hierarchy and a native macOS GUI remain
+future work. ScreenCaptureKit is unavailable on iOS 16.1.1.
+
+## Install and run
+
+1. Select successful [iOS](https://github.com/Justintunsday/iOSRemoteBridge/actions/workflows/build-ios.yml)
+   and [Windows](https://github.com/Justintunsday/iOSRemoteBridge/actions/workflows/build-client.yml)
+   Actions runs. Download `ios-rootless-deb`, `windows-client-x64` and
+   `windows-ffmpeg-corresponding-source`. Artifacts require repository access.
+2. Follow [DEVICE_TESTING.md](docs/DEVICE_TESTING.md) to provision over SSH,
+   install the package, load the daemon and keep a recovery path available.
+3. Extract the entire Windows artifact, launch iOSRemoteBridge.exe, select the
+   local pairing JSON, connect and approve physically on the unlocked iPhone.
+4. For automation follow [AUTOMATION.md](docs/AUTOMATION.md). Viewing is the
+   default; input needs `--control` plus local approval. Tap STOP to revoke it.
+
+Pairing files stay local. No Mac must remain connected after installation.
+A normal reboot requires jailbreak reactivation. Sleep/lock ends the session;
+the implementation does not bypass a passcode or disable auto-lock.
+
+## Engineering evidence
+
+| Document | Contents |
+| --- | --- |
+| [RESEARCH](docs/RESEARCH.md) | Pinned source analysis, API availability, licenses and technology choices |
+| [ARCHITECTURE](docs/ARCHITECTURE.md) | Actual modules, trust boundaries and frame lifetimes |
+| [COMPATIBILITY](docs/COMPATIBILITY.md) | Compile targets and runtime validation gates |
+| [SECURITY](docs/SECURITY.md) | Authentication, owner consent and threat-model limits |
+| [PERFORMANCE](docs/PERFORMANCE.md) | Evidence, calculated budgets and measurement procedures |
+| [CLIENT](docs/CLIENT.md) | Windows controls and source builds |
+| [AUTOMATION](docs/AUTOMATION.md) | API operations, Python and MCP |
+| [IMPLEMENTATION_PLAN](docs/IMPLEMENTATION_PLAN.md) | Milestone ledger and remaining work |
+
+Portable tests use CMake/CTest and Python unittest. iOS compilation uses macOS,
+Xcode's iPhoneOS SDK and pinned Theos. The SDK is not redistributed. Windows
+uses Visual Studio and pinned vcpkg dependencies. Workflow logs report actual
+SDK/library versions and build outcomes. No fabricated release is published.
+
+Original code is [MIT](LICENSE). Retained ScreenMirror notices and dependencies
+are documented in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.md). This software
+uses [FFmpeg](https://ffmpeg.org/) under LGPL-2.1-or-later; corresponding source
+is in the source artifact beside each successful Windows binary artifact.
+Reference repositories are not modified.
