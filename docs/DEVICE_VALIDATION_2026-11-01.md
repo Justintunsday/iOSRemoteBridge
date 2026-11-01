@@ -278,8 +278,8 @@ removed: connection, keyboard mode, text, single keys and app launch execute
 directly after pairing authentication while unlocked. Locked sessions still
 fail; TLS pin/token, read-only control selection, expiry and cleanup remain.
 
-Windows source `9547bde090402878ffa615736b5fc2ad0b0941e4` passed
-[build 41319953103](https://github.com/Justintunsday/iOSRemoteBridge/actions/runs/41319953103):
+Windows source `a322bf12af33fb12683c0ad8c8bc4ac9479eee7a` passed
+[build 41321223749](https://github.com/Justintunsday/iOSRemoteBridge/actions/runs/41321223749):
 eight CTest cases, GUI layout checks, TLS/H.264 integration and color decoding.
 The HID report test independently parses report lengths and checks modifier
 bits, rollover, releases, absolute coordinate bounds and mouse button/wheel bytes.
