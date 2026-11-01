@@ -1,0 +1,4 @@
+* text=auto eol=lf
+*.png binary
+*.sh text eol=lf
+ios/layout/DEBIAN/* text eol=lf
