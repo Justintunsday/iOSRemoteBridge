@@ -185,6 +185,26 @@ session. Physical monitor scanout, glass-to-glass latency, hardware encoder use,
 long-duration 60-FPS stability and battery use remain unverified. No new capture
 or acknowledgement timeout was observed during these short tests.
 
+## Adjustable Windows sharpening
+
+The Windows client at `74d14959cd596a98b780b90989e1e55ce57b4ec9`, from
+[build 41293093548](https://github.com/Justintunsday/iOSRemoteBridge/actions/runs/41293093548),
+adds a local 0–100% post-scale sharpening slider, initially 40%, and F7/F8
+shortcuts. Five CTest checks, GUI startup/aspect checks, TLS/action regression
+and encoded range fixtures passed. The same fixtures passed locally using
+D3D11VA; the private phone IDR still matched software output exactly.
+
+The new viewer was opened and live native-resolution playback observed. The
+owner adjusted the slider (a later accessibility reading showed 10%) and
+reported **"all fine"** before requesting a Windows executable package.
+Two additional 16-reading title samples averaged 46.09 and 58.03 decoded FPS
+(ranges 27.0–60.5 and 54.9–60.1). The first window included active touch input
+and RTT readings up to 163.7 ms; the second reached at most 20.2 ms RTT.
+Content and slider strength were not controlled or recorded per reading, so
+these do not isolate sharpening cost or prove a stable rate during interaction.
+They are retained alongside the earlier pre-sharpening sample rather than
+being presented as sustained 60-FPS evidence.
+
 ## Remaining validation
 
 Check longer Windows input/reconnect sessions, broader cross-app capture,
