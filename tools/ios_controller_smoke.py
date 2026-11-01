@@ -12,13 +12,34 @@ SIMULATOR=sys.argv[1]
 APP=next((ROOT/'build/controller-simulator').rglob('iOSRemoteBridge.app'))
 LOGS=ROOT/'build-logs'
 FIXTURE=(ROOT/'client/ios/Tests/gray-full.h264').read_bytes()
-def sim(*args,check=True):
+def sim(*args,check=True,timeout=60):
     print('simctl '+args[0],flush=True)
-    completed=subprocess.run(['xcrun','simctl',*args],check=False,capture_output=True,text=True,timeout=60)
+    completed=subprocess.run(['xcrun','simctl',*args],check=False,capture_output=True,text=True,timeout=timeout)
     if check and completed.returncode:
         raise RuntimeError(f'simctl {args[0]} failed: {completed.stderr[:3000]}')
     return completed
-sim('install',SIMULATOR,str(APP))
+def warmup():
+    sim('install',SIMULATOR,str(APP))
+    container=Path(sim('get_app_container',SIMULATOR,BUNDLE,'data').stdout.strip())
+    ready=container/'Library/Caches/irb-warmup-ready'
+    if ready.exists():ready.unlink()
+    # A fresh hosted Simulator can take minutes on its first app launch. Keep
+    # that cost outside the short-lived TLS server's handshake/credit timeouts.
+    sim('launch',SIMULATOR,BUNDLE,'--irb-warmup',timeout=240)
+    deadline=time.monotonic()+30
+    while not ready.exists() and time.monotonic()<deadline:time.sleep(.25)
+    assert ready.exists(),'first launch did not finish controller initialization'
+    sim('terminate',SIMULATOR,BUNDLE)
+    print('Cold simulator launch completed',flush=True)
+
+def diagnostics():
+    for arguments,name in [
+        (('io',SIMULATOR,'screenshot',str(LOGS/'controller-failure.png')),'controller-failure-screenshot.log'),
+        (('spawn',SIMULATOR,'log','show','--last','3m','--predicate',f'process == "iOSRemoteBridge"'),'controller-failure-system.log')]:
+        try:
+            output=sim(*arguments,check=False,timeout=25)
+            (LOGS/name).write_text((output.stdout+'\n'+output.stderr)[-200000:])
+        except subprocess.TimeoutExpired:(LOGS/name).write_text('Simulator diagnostic command timed out')
 def scenario(wrong_pin):
     name='wrong-pin' if wrong_pin else 'stream-and-input'
     print('Starting '+name,flush=True)
@@ -87,6 +108,11 @@ def scenario(wrong_pin):
             operations=observed['operations'];assert [x['op'] for x in operations]==['touch','touch','touch','press_home','type_text'],observed
             assert [x['phase'] for x in operations[:3]]==[0,1,2],observed
         print(name+': '+json.dumps(result,ensure_ascii=False),flush=True)
-scenario(False)
-scenario(True)
-print('Actual iOS Simulator TLS, certificate-pin, decoded grayscale, coordinate and control checks passed')
+try:
+    warmup()
+    scenario(False)
+    scenario(True)
+    print('Actual iOS Simulator TLS, certificate-pin, decoded grayscale, coordinate and control checks passed')
+except Exception:
+    diagnostics()
+    raise

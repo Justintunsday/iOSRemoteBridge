@@ -65,7 +65,7 @@ jobs:
           codesign --force --sign - --timestamp=none --entitlements client/ios/Tests/Simulator.entitlements "$simulator_app"
           codesign --verify --deep --strict "$simulator_app"
       - name: Test real iOS TLS, H.264 decode, rendering and touch protocol
-        timeout-minutes: 5
+        timeout-minutes: 10
         run: |
           set -euo pipefail
           python3 -u tools/ios_controller_smoke.py "$CONTROLLER_SIMULATOR" 2>&1 | tee build-logs/controller-simulator-tests.txt

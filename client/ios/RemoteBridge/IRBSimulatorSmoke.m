@@ -12,6 +12,9 @@ void IRBPrepareSimulatorSmoke(void) {
     NSError *error=nil;if(profile) [IRBProfileStore save:profile error:&error];keychainError=error;
 }
 void IRBStartSimulatorSmoke(IRBControllerViewController *controller) {
+    if([NSProcessInfo.processInfo.arguments containsObject:@"--irb-warmup"]) {
+        [@"ready" writeToURL:smokeFile(@"irb-warmup-ready") atomically:YES encoding:NSUTF8StringEncoding error:NULL];return;
+    }
     if(!smokeRequested()) return;
     NSData *data=[NSData dataWithContentsOfURL:smokeFile(@"irb-smoke-profile.json")];IRBProfile *profile=data?[IRBProfile fromData:data error:NULL]:nil;
     NSData *optionsData=[NSData dataWithContentsOfURL:smokeFile(@"irb-smoke-options.json")];
