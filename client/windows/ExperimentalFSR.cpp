@@ -65,7 +65,7 @@ struct ExperimentalFSR::Impl {
         if(event) CloseHandle(event);
         if(module) FreeLibrary(module);
     }
-    void init() {
+    void init(int maximumVersion) {
         wchar_t path[32768]{}; DWORD length=GetModuleFileNameW(nullptr,path,32768);
         if(!length||length>=32768) throw std::runtime_error("Cannot resolve FSR runtime directory");
         auto dll=std::filesystem::path(path).parent_path()/L"amd_fidelityfx_loader_dx12.dll";
@@ -91,7 +91,7 @@ struct ExperimentalFSR::Impl {
         q.versionIds=ids.data(); q.versionNames=names.data(); fxcheck(api.Query(nullptr,&q.header),"Read FSR providers");
         for(size_t i=0;i<count;++i) if(names[i]) {
             std::string name=names[i];
-            if(providerRank(name)) candidates.push_back({ids[i],name});
+            if(providerRank(name)&&providerRank(name)<=maximumVersion) candidates.push_back({ids[i],name});
         }
         std::stable_sort(candidates.begin(),candidates.end(),[](const Candidate &a,const Candidate &b){return providerRank(a.name)>providerRank(b.name);});
         if(candidates.empty()) throw std::runtime_error("No supported FSR 4/3/2.3 provider");
@@ -215,10 +215,13 @@ struct ExperimentalFSR::Impl {
 ExperimentalFSR::ExperimentalFSR()=default;
 ExperimentalFSR::~ExperimentalFSR()=default;
 void ExperimentalFSR::reset() { impl_.reset(); failed_=false; error_.clear(); provider_.clear(); }
+void ExperimentalFSR::setMaximumVersion(int major) {
+    major=std::clamp(major,2,4); if(major!=maximumVersion_) { reset(); maximumVersion_=major; }
+}
 bool ExperimentalFSR::probe(std::vector<std::string> &versions) {
     if(failed_) return false;
     try {
-        if(!impl_) { impl_=std::make_unique<Impl>(); impl_->init(); }
+        if(!impl_) { impl_=std::make_unique<Impl>(); impl_->init(maximumVersion_); }
         versions.clear(); for(auto &c:impl_->candidates) versions.push_back(c.name); return true;
     } catch(const std::exception &e) { error_=e.what(); failed_=true; return false; }
 }

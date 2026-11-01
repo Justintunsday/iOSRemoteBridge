@@ -68,8 +68,9 @@ or smaller images use regular sampling. It does not generate extra frames.
 
 FSR 4/3/2.3 (exp.) is a separate, **off-by-default experiment**. AMD SDK 2.4
 enumerates providers and attempts 4, then 3, then 2.3. The display notice reports
-the actual context's version. This video stream has no engine depth, motion or
-camera jitter: the experiment supplies a flat plane, zero motion, fixed exposure
+the actual context's version. The selector can start from 4, 3 or 2.3. This video
+stream has no engine depth, motion or camera jitter: the experiment supplies a
+flat plane, zero motion, fixed exposure
 and resets history on every frame. It has no temporal accumulation and is not a
 complete game-style FSR integration. It uses DX12 conversion/upload/readback
 before D3D11 presentation and can reduce FPS or add latency. The stable renderer
@@ -99,6 +100,10 @@ software if GPU decoding was unavailable or reset. `irb-gpu-check.exe` checks
 native range, EASU/RCAS output and presentation; `--warp` tests software D3D.
 `irb-fsr-check.exe --probe` lists SDK versions; without the flag it checks a
 synthetic single-frame upscale and reports conversion/GPU/readback time.
+`irb-fsr-check.exe --phone` uses a synthetic 375x667 to 750x1334 image instead.
+Add `--fsr3` or `--fsr2` to start with the older providers.
+The display notice's draw FPS counts presentation calls separately from decoded
+FPS in the title; it does not count monitor scanout or identify unique content.
 
 GPU download retains the decoded frame's color properties. Full-range and
 limited-range video use the corresponding conversion into full-range BGRA,

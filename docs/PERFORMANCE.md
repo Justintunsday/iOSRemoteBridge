@@ -40,7 +40,10 @@ passes an IOSurface-backed pixel buffer to VideoToolbox, which may perform its
 own conversion. It is a low-copy API path, not a measured zero-copy end-to-end
 pipeline. Lower-resolution mode adds a Core Image GPU scaling request. The
 Windows renderer explicitly copies GPU-decoded frames back to CPU BGRA and
-uses GDI; optimizing this to D3D presentation is outstanding.
+uploads them to D3D11. The optional experimental FSR SDK path adds float-color
+conversion, DX12 upload, GPU processing and CPU readback. It is not zero-copy.
+The title counts decoded frames; the display notice separately counts draw calls.
+Shader microbenchmarks and draw rate do not establish physical display latency.
 
 Bounded frame credit prevents runaway latency under backpressure. The current
 maximum is three frames, with one/two-frame modes available through the Python

@@ -6,10 +6,15 @@
 #include <string>
 int main(int argc,char **argv) {
     ExperimentalFSR fsr; std::vector<std::string> versions;
+    bool phone=false,probe=false;
+    for(int i=1;i<argc;++i) {
+        std::string arg=argv[i];
+        if(arg=="--phone") phone=true; if(arg=="--probe") probe=true;
+        if(arg=="--fsr3") fsr.setMaximumVersion(3); if(arg=="--fsr2") fsr.setMaximumVersion(2);
+    }
     if(!fsr.probe(versions)) { std::cerr<<fsr.error()<<'\n'; return 1; }
     std::cout<<"Available SDK providers:"; for(auto &version:versions) std::cout<<' '<<version; std::cout<<'\n';
-    if(argc>1&&std::string(argv[1])=="--probe") return 0;
-    bool phone=argc>1&&std::string(argv[1])=="--phone";
+    if(probe) return 0;
     VideoFrame input; input.width=phone?375:128; input.height=phone?667:128;
     int width=input.width*2,height=input.height*2;
     input.bgra.resize(static_cast<size_t>(input.width)*input.height*4);

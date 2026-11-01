@@ -11,10 +11,12 @@ class ExperimentalFSR {
     std::unique_ptr<Impl> impl_;
     std::string error_,provider_;
     bool failed_=false;
+    int maximumVersion_=4;
 public:
     ExperimentalFSR();
     ~ExperimentalFSR();
     void reset();
+    void setMaximumVersion(int major);
     bool probe(std::vector<std::string> &versions);
     bool process(const VideoFrame &input,int width,int height,VideoFrame &output);
     const std::string &provider() const { return provider_; }

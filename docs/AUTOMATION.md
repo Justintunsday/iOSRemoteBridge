@@ -36,7 +36,9 @@ AUTH field and retains its one-frame behavior. Credits remain ordered per frame.
 | touch | finger (0..9), phase (0 down / 1 move / 2 up), x, y |
 | type_text | text, maximum 1024 US-layout ASCII characters; separate local approval |
 | key | usage (USB keyboard page 0x07, 4..231); one press/release; separate local approval |
-| press_home / app_switcher | no parameters; guarded SpringBoard navigation handlers |
+| keyboard_mode | enabled (JSON boolean); enabling asks locally for a session-scoped live-keyboard grant; disabling releases keys and revokes it |
+| key_event | usage (4..231), down (JSON boolean); needs the live-keyboard grant, never replays on reconnect |
+| press_home / app_switcher / control_center | no parameters; guarded SpringBoard navigation handlers |
 | volume_up / volume_down | no parameters; device delivery needs verification |
 | launch_app | bundle_id; dynamic workspace API; separate local approval |
 | configure | bitrate (500000..20000000); optional fps (30/60) and scale (.25..1) together |

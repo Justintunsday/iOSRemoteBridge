@@ -81,7 +81,7 @@ SpringBoard thread. The mouse controls one contact; API contacts 0..9 permit
 multi-touch. Coordinates are normalized in the natural portrait plane. The
 viewer applies inverse rotation and rejects letterbox clicks.
 
-Home and App Switcher use dynamically guarded SpringBoard handlers. Volume
+Home, App Switcher and Control Center use dynamically guarded SpringBoard handlers. Volume
 and keyboard remain HID operations. Separate HID clients observe the physical
 sender and submit synthetic events; aggregate hand fields are restored after
 attaching finger events. Input replies describe submission, with delivery
@@ -89,21 +89,36 @@ established separately by inspecting the resulting screen.
 
 The native client uses Win32, OpenSSL and dynamically linked FFmpeg. D3D11VA is
 selected when offered; decode failure resets to software and requests an IDR.
-Pixels are copied back to BGRA and presented with GDI. This avoids a heavyweight
-UI runtime but leaves a CPU/rendering optimization opportunity. The Python
+Pixels are copied back to BGRA and uploaded to a D3D11 presenter. The Python
 API uses only the standard library and supports persistent JSON-lines RPC. The
 optional standard MCP adapter uses the pinned official Python SDK and exposes
 screen-image and authorized-input tools over stdio, without a local network port.
 The implementation has no required Mac after package installation and pairing.
 
-Windows composes each paint in a persistent top-down DIB, scales the video, then
-optionally applies a 0–100% luma unsharp mask (default 40%) before one final blit.
-Three reusable original-luma rows allow in-place filtering. The edge adjustment
-is capped at 16 levels and constrained by all three channels' remaining range;
-flat tones, alpha, letterboxing and channel differences remain unchanged. GDI
-writes are flushed before CPU access. The UI retains an immutable frame snapshot
-without holding the handoff mutex during painting. Input rotation matches that
-painted snapshot rather than a newer pending frame.
+Windows uses a dedicated video child window and a D3D11 flip-model swap chain.
+VSync chooses Present interval 1 or 0, with supported tearing flags for interval 0.
+Scaling uses bilinear sampling or AMD's FSR 1 EASU for enlargement; optional RCAS
+applies the Sharp strength afterward. Shader sources and the unmodified FSR 1
+headers are embedded resources. BGRA textures are UNORM without an extra sRGB
+decode/encode step. GPU initialization/presentation failure falls back to the
+buffered GDI luma-sharpening path and disables advanced options.
+
+The off-by-default SDK 2.4 experiment uses a separate DX12 queue and pinned,
+signed AMD loader/upscaler DLLs. It enumerates 4/3/2.3 providers and pins the
+requested version, querying the actual selected context for display. Each frame
+uses linear float color, a flat depth plane, zero motion, fixed exposure and
+history reset. There is no temporal accumulation or frame generation. Explicit
+sRGB conversion surrounds the SDK and CPU readback bridges back to D3D11. This
+prototype can add significant processing time; unsupported providers fall through
+to older versions and then ordinary presentation. The UI reports draw calls per
+second separately from the decoder's FPS; neither is physical monitor scanout.
+
+The UI retains an immutable frame without holding the handoff mutex while
+painting. Toolbar visibility changes layout and aspect constraints. Input uses
+the video child-to-parent transform, inverse rotation and rendered letterbox.
+Focused-window shortcuts avoid local edit fields. Live HID down/up input requires
+a separate on-phone session grant. Key-up cleanup remains allowed during a
+confirmation; focus loss, mode revocation and disconnect release held keys.
 
 Modules are separated under ios/capture, encoder, input, common and daemon;
 client decoder and connection modules are independent. CI tests production
