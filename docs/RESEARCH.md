@@ -163,3 +163,14 @@ on the exact device before adding WebRTC, a D3D renderer, automatic app
 orientation, broad Unicode input, audio or accessibility metadata. Evidence
 from source inspection supports the implementation strategy; only the physical
 tests in DEVICE_TESTING.md can establish its practical compatibility.
+
+## Device-driven capture correction
+
+The first on-device CAR path with a null display name produced empty pixels
+despite a functioning encoder/transport. Independent primary implementations
+([RecordMyScreen](https://github.com/coolstar/RecordMyScreen/blob/master/RecordMyScreen/CSScreenRecorder.m),
+[ioscpy](https://github.com/lautarovculic/ioscpy/blob/main/device/tweak/Capture.mm))
+use a display name and declare a void return. The prototype now resolves
+CADisplay.mainDisplay.name with an LCD fallback and does not interpret a return
+register as a status code. This correction must be visually revalidated on the
+phone; frame counts alone were insufficient to establish valid screen pixels.

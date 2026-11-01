@@ -2,15 +2,19 @@
 #import "IRBCapture.h"
 #import <IOSurface/IOSurfaceRef.h>
 #import <dlfcn.h>
+#import <objc/message.h>
 #import <mach/mach.h>
 #import <CoreImage/CoreImage.h>
-typedef kern_return_t (*RenderDisplay)(mach_port_t,CFStringRef,IOSurfaceRef,int,int);
+// Historical/independent callers declare a void return; do not fabricate a
+// kern_return_t success value from the return register of this private API.
+typedef void (*RenderDisplay)(mach_port_t,CFStringRef,IOSurfaceRef,int,int);
 @implementation IRBCapture {
     RenderDisplay _render;
     CVPixelBufferPoolRef _pool;
     CVPixelBufferPoolRef _scaledPool;
     CIContext *_ci;
     int _nativeWidth,_nativeHeight;
+    NSString *_displayName;
 }
 - (BOOL)prepareWithScale:(double)scale {
     if(!isfinite(scale)||scale<.25||scale>1) return NO;
@@ -19,6 +23,16 @@ typedef kern_return_t (*RenderDisplay)(mach_port_t,CFStringRef,IOSurfaceRef,int,
     void *lib=dlopen("/System/Library/Frameworks/QuartzCore.framework/QuartzCore",RTLD_NOW);
     _render=lib?(RenderDisplay)dlsym(lib,"CARenderServerRenderDisplay"):NULL;
     if(!_render) { _error=@"CARenderServerRenderDisplay unavailable"; return NO; }
+    _displayName=@"LCD";
+    Class displayClass=NSClassFromString(@"CADisplay");
+    SEL main=NSSelectorFromString(@"mainDisplay"),name=NSSelectorFromString(@"name");
+    if([displayClass respondsToSelector:main]) {
+        id display=((id(*)(id,SEL))objc_msgSend)(displayClass,main);
+        if([display respondsToSelector:name]) {
+            id resolved=((id(*)(id,SEL))objc_msgSend)(display,name);
+            if([resolved isKindOfClass:NSString.class]&&[resolved length]) _displayName=resolved;
+        }
+    }
     CGSize s=UIScreen.mainScreen.nativeBounds.size;
     _nativeWidth=(int)s.width; _nativeHeight=(int)s.height;
     _width=MAX(2,((int)llround(s.width*scale))&~1);
@@ -43,8 +57,8 @@ typedef kern_return_t (*RenderDisplay)(mach_port_t,CFStringRef,IOSurfaceRef,int,
     NSDictionary *aux=@{(id)kCVPixelBufferPoolAllocationThresholdKey:@3};
     if(CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(NULL,_pool,(__bridge CFDictionaryRef)aux,&pb)) return NULL;
     IOSurfaceRef surface=CVPixelBufferGetIOSurface(pb);
-    kern_return_t r=surface?_render(MACH_PORT_NULL,NULL,surface,0,0):KERN_FAILURE;
-    if(r!=KERN_SUCCESS) { _error=[NSString stringWithFormat:@"render returned %d",r]; CVPixelBufferRelease(pb); return NULL; }
+    if(!surface) { _error=@"pixel buffer has no IOSurface"; CVPixelBufferRelease(pb); return NULL; }
+    _render(MACH_PORT_NULL,(__bridge CFStringRef)_displayName,surface,0,0);
     /* No screenshot fallback, black-frame substitution, secure-layer flags or
        protected-content entitlements. A symbol resolving does not verify pixels. */
     if(!_scaledPool) return pb;
