@@ -26,7 +26,7 @@ void IRBStartSimulatorSmoke(IRBControllerViewController *controller) {
         if(finished) return;finished=YES;result[@"passed"]=ok?@YES:@NO;result[@"reason"]=reason;
         [[NSJSONSerialization dataWithJSONObject:result options:NSJSONWritingPrettyPrinted error:NULL] writeToURL:smokeFile(@"irb-smoke-result.json") atomically:YES];
     };
-    void(^maybeFinish)(void)=^{if([result[@"decoded_frames"] intValue]>=3&&[result[@"responses"] intValue]>=5) finish([result[@"pixels_valid"] boolValue]&&[result[@"coordinates_valid"] boolValue],@"video, color, coordinate mapping and ordered control replies");};
+    void(^maybeFinish)(void)=^{if([result[@"decoded_frames"] intValue]>=3&&[result[@"responses"] intValue]>=6) finish([result[@"pixels_valid"] boolValue]&&[result[@"coordinates_valid"] boolValue],@"video, color, coordinate mapping and ordered control replies");};
     void(^oldState)(IRBSessionState,NSString *)=controller.session.onState;
     controller.session.onState=^(IRBSessionState state,NSString *message) {
         if(oldState) oldState(state,message);
@@ -38,9 +38,15 @@ void IRBStartSimulatorSmoke(IRBControllerViewController *controller) {
         if(!sent) {
             sent=YES;size_t width=CVPixelBufferGetWidth(image),height=CVPixelBufferGetHeight(image);CVPixelBufferLockBaseAddress(image,kCVPixelBufferLock_ReadOnly);
             uint8_t *plane=CVPixelBufferGetBaseAddressOfPlane(image,0);int black=plane?plane[0]:-1,white=plane?plane[width-1]:-1;
+            const int expected[]={0,8,16,32,64,128,192,224,235,240,248,255};
+            BOOL pixelsValid=plane&&width==192&&height==64;NSMutableArray *levels=[NSMutableArray new];
+            if(pixelsValid) for(NSUInteger i=0;i<12;++i) {
+                int value=plane[32*CVPixelBufferGetBytesPerRowOfPlane(image,0)+i*16+8];[levels addObject:@(value)];
+                if(abs(value-expected[i])>5) pixelsValid=NO;
+            }
             CVPixelBufferUnlockBaseAddress(image,kCVPixelBufferLock_ReadOnly);
             result[@"width"]=@(width);result[@"height"]=@(height);result[@"black"]=@(black);result[@"white"]=@(white);
-            result[@"pixels_valid"]=@(width==256&&height==16&&black>=0&&black<=8&&white>=240);
+            result[@"pixels_valid"]=@(pixelsValid);result[@"luma_levels"]=levels;
             CGPoint natural;CGRect bounds=controller.videoView.bounds;
             BOOL center=[controller.videoView normalizedPoint:CGPointMake(CGRectGetMidX(bounds),CGRectGetMidY(bounds)) clamp:NO result:&natural]&&fabs(natural.x-.5)<.001&&fabs(natural.y-.5)<.001;
             BOOL letterbox=![controller.videoView normalizedPoint:CGPointMake(1,1) clamp:NO result:&natural];result[@"coordinates_valid"]=@(center&&letterbox);

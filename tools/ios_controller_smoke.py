@@ -69,7 +69,7 @@ def scenario(wrong_pin):
                         packet=wire.Header(kind,1 if kind==wire.VIDEO else 0,len(body),sequence,pts).pack()+body
                         for offset in range(0,len(packet),19): sock.sendall(packet[offset:offset+19])
                     send(wire.RESPONSE,{'event':'authenticated'})
-                    send(wire.RESPONSE,{'event':'authorized','device':{'model':'SYNTHETIC_TEST','width':256,'height':16}})
+                    send(wire.RESPONSE,{'event':'authorized','device':{'model':'SYNTHETIC_TEST','width':192,'height':64}})
                     for pts in (100,101,102): send(wire.VIDEO,FIXTURE,pts)
                     while True:
                         h=wire.unpack(wire.recv_exact(sock,24));body=wire.recv_exact(sock,h.length);rx+=1
@@ -105,8 +105,9 @@ def scenario(wrong_pin):
         if wrong_pin:assert not observed['auth'],'credentials were sent before certificate verification'
         else:
             assert observed['auth'] and observed['credits']==[100,101,102],observed
-            operations=observed['operations'];assert [x['op'] for x in operations]==['touch','touch','touch','press_home','type_text'],observed
-            assert [x['phase'] for x in operations[:3]]==[0,1,2],observed
+            operations=observed['operations'];assert [x['op'] for x in operations]==['configure','touch','touch','touch','press_home','type_text'],observed
+            assert operations[0]['fps']==60 and operations[0]['scale']==1 and operations[0]['bitrate']==8000000,observed
+            assert [x['phase'] for x in operations[1:4]]==[0,1,2],observed
         print(name+': '+json.dumps(result,ensure_ascii=False),flush=True)
 try:
     warmup()

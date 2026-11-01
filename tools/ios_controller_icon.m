@@ -1,8 +1,10 @@
 #import <AppKit/AppKit.h>
+#include <string.h>
 int main(int argc,const char *argv[]) { @autoreleasepool {
     if(argc!=2) return 2;
-    NSBitmapImageRep *bitmap=[[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:1024 pixelsHigh:1024 bitsPerSample:8 samplesPerPixel:3 hasAlpha:NO isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:0 bitsPerPixel:0];
-    [NSGraphicsContext saveGraphicsState];NSGraphicsContext.currentContext=[NSGraphicsContext graphicsContextWithBitmapImageRep:bitmap];
+    NSBitmapImageRep *bitmap=[[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:1024 pixelsHigh:1024 bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:0 bitsPerPixel:0];
+    NSGraphicsContext *graphics=[NSGraphicsContext graphicsContextWithBitmapImageRep:bitmap];if(!graphics) return 3;
+    [NSGraphicsContext saveGraphicsState];NSGraphicsContext.currentContext=graphics;
     NSGradient *gradient=[[NSGradient alloc] initWithStartingColor:[NSColor colorWithRed:.04 green:.13 blue:.34 alpha:1] endingColor:[NSColor colorWithRed:.05 green:.48 blue:.83 alpha:1]];
     [gradient drawInRect:NSMakeRect(0,0,1024,1024) angle:45];
     [[NSColor colorWithWhite:1 alpha:.16] setFill];[[NSBezierPath bezierPathWithRoundedRect:NSMakeRect(120,300,610,430) xRadius:48 yRadius:48] fill];
@@ -12,6 +14,13 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
     NSBezierPath *bar=[NSBezierPath bezierPath];[bar moveToPoint:NSMakePoint(645,750)];[bar lineToPoint:NSMakePoint(750,750)];bar.lineWidth=18;bar.lineCapStyle=NSLineCapStyleRound;[bar stroke];
     [[NSColor colorWithRed:.35 green:.91 blue:1 alpha:1] setStroke];
     NSBezierPath *arrow=[NSBezierPath bezierPath];[arrow moveToPoint:NSMakePoint(330,525)];[arrow lineToPoint:NSMakePoint(690,525)];[arrow moveToPoint:NSMakePoint(600,615)];[arrow lineToPoint:NSMakePoint(690,525)];[arrow lineToPoint:NSMakePoint(600,435)];arrow.lineWidth=36;arrow.lineCapStyle=NSLineCapStyleRound;arrow.lineJoinStyle=NSLineJoinStyleRound;[arrow stroke];
-    [NSGraphicsContext restoreGraphicsState];NSData *png=[bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+    [graphics flushGraphics];[NSGraphicsContext restoreGraphicsState];
+    // Draw in a supported RGBA context, then encode an opaque RGB app icon.
+    NSBitmapImageRep *rgb=[[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:1024 pixelsHigh:1024 bitsPerSample:8 samplesPerPixel:3 hasAlpha:NO isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:0 bitsPerPixel:0];
+    if(!rgb||!bitmap.bitmapData||!rgb.bitmapData) return 3;
+    for(NSUInteger y=0;y<1024;++y) for(NSUInteger x=0;x<1024;++x)
+        memcpy(rgb.bitmapData+y*rgb.bytesPerRow+x*3,bitmap.bitmapData+y*bitmap.bytesPerRow+x*4,3);
+    if(!rgb.bitmapData[0]&&!rgb.bitmapData[1]&&!rgb.bitmapData[2]) return 3;
+    NSData *png=[rgb representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
     return [png writeToFile:[NSString stringWithUTF8String:argv[1]] atomically:YES]?0:1;
 } }

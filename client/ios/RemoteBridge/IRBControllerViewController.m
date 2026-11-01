@@ -66,7 +66,7 @@
         [owner->_connect setTitle:state==IRBSessionIdle?@"连接":state==IRBSessionConnecting?@"取消":@"断开" forState:UIControlStateNormal];
         owner->_host.enabled=owner->_port.enabled=state==IRBSessionIdle;[owner remoteEnabled:state==IRBSessionStreaming];UIApplication.sharedApplication.idleTimerDisabled=state==IRBSessionStreaming;
         if(state!=IRBSessionStreaming) { [owner->_videoView clear];owner->_stats.text=@"视频尚未连接"; }
-        else if(owner->_scale!=1) [owner applyQuality];[owner setNeedsUpdateOfScreenEdgesDeferringSystemGestures];
+        else [owner applyQuality];[owner setNeedsUpdateOfScreenEdgesDeferringSystemGestures];
     };
     _session.onFrame=^(CVPixelBufferRef image,uint64_t pts) {(void)pts;[weak.videoView display:image];};
     _session.onStats=^(NSDictionary *stats) {IRBControllerViewController *owner=weak;if(!owner) return;owner->_stats.text=[NSString stringWithFormat:@"%.1f FPS · RTT %.1f ms · %d FPS%@",[stats[@"fps"] doubleValue],[stats[@"rtt_ms"] doubleValue],owner->_fps,owner->_scale==1?@" 原生分辨率":@" 半分辨率"];};
