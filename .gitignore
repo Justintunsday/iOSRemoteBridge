@@ -9,6 +9,7 @@ dist/
 .theos-toolchain/
 .vcpkg/
 .vcpkg-cache/
+.vcpkg-overlays/
 extracted-package/
 build-logs/
 validation-tests

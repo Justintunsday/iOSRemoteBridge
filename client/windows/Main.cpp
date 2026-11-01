@@ -24,6 +24,7 @@ double currentScale=1;
 RECT videoRect{};
 bool dragging=false;
 double lastX=0,lastY=0;
+ULONGLONG lastMove=0;
 enum {Config=10,Browse,Connect,Disconnect,Home,Switcher,VolumeUp,VolumeDown,SendText,Bitrate};
 std::wstring wide(const std::string &text) {
     int size=MultiByteToWideChar(CP_UTF8,0,text.data(),static_cast<int>(text.size()),nullptr,0);
@@ -167,7 +168,10 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         } return 0;
     }
     case WM_MOUSEMOVE:
-        if(dragging) { double x,y; if(point(l,x,y)) { lastX=x; lastY=y; command({{"op","touch"},{"finger",0},{"phase",1},{"x",x},{"y",y}}); } } return 0;
+        if(dragging) { double x,y; if(point(l,x,y)) {
+            lastX=x; lastY=y; ULONGLONG now=GetTickCount64();
+            if(now-lastMove>=8) { lastMove=now; command({{"op","touch"},{"finger",0},{"phase",1},{"x",x},{"y",y}}); }
+        } } return 0;
     case WM_LBUTTONUP: endDrag(); return 0;
     case WM_CAPTURECHANGED: if(dragging) endDrag(); return 0;
     case FrameMessage: framePosted=false; InvalidateRect(hwnd,nullptr,FALSE); return 0;

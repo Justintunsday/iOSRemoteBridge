@@ -20,6 +20,9 @@ for this configuration. Source and build patches are in the
 Users may replace those DLLs with compatible versions. No restriction on
 reverse engineering for debugging modifications to these libraries is imposed.
 The executable artifact includes the full dependency license texts.
+The generated overlay enables only the H.264 decoder/parser and its D3D11VA
+accelerators, with no video encoders or unrelated codecs. Its exact portfile,
+patches, generator and compiled configuration accompany the source archive.
 
 Dependencies are resolved by vcpkg baseline
 `9a5dfef5d1a0438a7d24856a85bd60f309d355e9`. See vcpkg.json and the workflow

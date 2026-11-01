@@ -23,7 +23,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .vcpkg-cache
-          key: windows-vcpkg-${{ hashFiles('vcpkg.json') }}
+          key: windows-vcpkg-${{ hashFiles('vcpkg.json', 'tools/prepare_ffmpeg_port.py') }}
+          restore-keys: windows-vcpkg-
       - name: Install pinned vcpkg
         shell: pwsh
         run: |
@@ -35,10 +36,12 @@ jobs:
           git -C .vcpkg checkout --detach FETCH_HEAD
           & ./.vcpkg/bootstrap-vcpkg.bat -disableMetrics
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/prepare_ffmpeg_port.py .vcpkg .vcpkg-overlays
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Resolve dependencies and configure
         shell: pwsh
         run: |
-          cmake -S . -B build -A x64 -DIRB_BUILD_CLIENT=ON -DCMAKE_TOOLCHAIN_FILE="$pwd/.vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows 2>&1 | Tee-Object build-logs/configure.log
+          cmake -S . -B build -A x64 -DIRB_BUILD_CLIENT=ON -DCMAKE_TOOLCHAIN_FILE="$pwd/.vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DVCPKG_OVERLAY_PORTS="$pwd/.vcpkg-overlays" 2>&1 | Tee-Object build-logs/configure.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Compile native receiver
         shell: pwsh
@@ -76,7 +79,8 @@ jobs:
           Invoke-WebRequest "https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n$($meta.version).tar.gz" -OutFile dist/sources/ffmpeg-original.tar.gz
           $actual = (Get-FileHash dist/sources/ffmpeg-original.tar.gz -Algorithm SHA512).Hash.ToLowerInvariant()
           if ($actual -ne $expected) { throw 'FFmpeg source archive hash mismatch' }
-          Copy-Item .vcpkg/ports/ffmpeg dist/sources/vcpkg-ffmpeg-port -Recurse
+          Copy-Item .vcpkg-overlays/ffmpeg dist/sources/vcpkg-ffmpeg-port -Recurse
+          Copy-Item tools/prepare_ffmpeg_port.py dist/sources/
           Copy-Item build-logs/decoder-test.log dist/sources/FFMPEG-BUILD.txt
           Copy-Item vcpkg.json dist/sources/
           Copy-Item docs/CLIENT.md dist/windows/README.md
@@ -103,4 +107,4 @@ jobs:
         if: always() && steps.vcpkg_cache.outputs.cache-hit != 'true'
         with:
           path: .vcpkg-cache
-          key: windows-vcpkg-${{ hashFiles('vcpkg.json') }}
+          key: windows-vcpkg-${{ hashFiles('vcpkg.json', 'tools/prepare_ffmpeg_port.py') }}

@@ -46,7 +46,8 @@ Build from source on Windows with Visual Studio 2022 C++ Build Tools, CMake and
 the pinned vcpkg checkout:
 
 ```powershell
-cmake -S . -B build -A x64 -DIRB_BUILD_CLIENT=ON -DCMAKE_TOOLCHAIN_FILE=PATH_TO_VCPKG/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows
+python tools/prepare_ffmpeg_port.py PATH_TO_VCPKG .vcpkg-overlays
+cmake -S . -B build -A x64 -DIRB_BUILD_CLIENT=ON -DCMAKE_TOOLCHAIN_FILE=PATH_TO_VCPKG/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows -DVCPKG_OVERLAY_PORTS=.vcpkg-overlays
 cmake --build build --config Release --parallel
 ctest --test-dir build -C Release --output-on-failure
 ```

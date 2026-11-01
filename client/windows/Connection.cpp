@@ -5,6 +5,7 @@
 #include <openssl/crypto.h>
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cstdio>
 #include <memory>
 #include <stdexcept>
@@ -29,6 +30,11 @@ void Connection::close() {
 bool Connection::command(json request) {
     if(!authorized_) return false;
     std::lock_guard<std::mutex> lock(queueMutex_);
+    if(!commands_.empty()&&request.value("op",std::string())=="touch"&&request.value("phase",-1)==1) {
+        auto &previous=commands_.back();
+        if(previous.value("op",std::string())=="touch"&&previous.value("phase",-1)==1&&
+           previous.value("finger",-1)==request.value("finger",-2)) { previous=std::move(request); return true; }
+    }
     if(commands_.size()>=128) return false;
     commands_.push_back(std::move(request)); return true;
 }
