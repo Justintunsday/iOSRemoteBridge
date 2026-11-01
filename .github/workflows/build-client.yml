@@ -74,6 +74,7 @@ jobs:
           New-Item -ItemType Directory -Force dist/windows/licenses, dist/windows/diagnostics, dist/sources | Out-Null
           Copy-Item build/client/windows/Release/iOSRemoteBridge.exe dist/windows/
           Copy-Item build/client/windows/Release/irb-color-check.exe dist/windows/
+          Copy-Item build/client/windows/Release/irb-gpu-check.exe dist/windows/
           Copy-Item build/color-fixtures/*.h264 dist/windows/diagnostics/
           Copy-Item build/client/windows/Release/*.dll dist/windows/
           Copy-Item LICENSE,THIRD_PARTY_NOTICES.md dist/windows/licenses/

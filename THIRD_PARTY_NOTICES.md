@@ -6,6 +6,13 @@ VideoToolbox implementation was informed by e1abrador/ScreenMirror at
 [licenses/ScreenMirror-MIT.txt](licenses/ScreenMirror-MIT.txt), including in the
 installed iOS package. The new protocol is not compatible with ScreenMirror.
 
+Windows GPU scaling embeds AMD FidelityFX Super Resolution 1 EASU/RCAS headers
+from GPUOpen-Effects/FidelityFX-FSR commit
+`a21ffb8f6c13233ba336352bdff293894c706575`, under MIT. The unmodified headers
+are in client/windows/shaders/vendor, including their original notices.
+AMD and the shader portability header's Michal Drobot notice are retained in
+licenses/AMD-FSR1-MIT.txt and the Windows license bundle.
+
 ZXTouch Rootless (`a602da112ef1a688fb2601424443abb1ccc28c63`) was inspected as a
 technical reference. It is GPL-3.0. No ZXTouch source, objects or binaries are
 linked or distributed here. Any future integration must be a separately

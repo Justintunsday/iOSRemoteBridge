@@ -2,6 +2,7 @@
 #include "irb_protocol.h"
 #include "RpcReply.h"
 #include "BufferedRenderer.h"
+#include "D3DRenderer.h"
 #include <windowsx.h>
 #include <commdlg.h>
 #include <commctrl.h>
@@ -16,13 +17,16 @@
 using json=nlohmann::json;
 namespace {
 constexpr UINT FrameMessage=WM_APP+1,StatusMessage=WM_APP+2,ResponseMessage=WM_APP+3;
-constexpr int ExpandedToolbarHeight=190;
+constexpr int ExpandedToolbarHeight=220;
 constexpr UINT ToggleToolbarSystem=0x0100;
 HWND window,configEdit,textEdit,bitrateEdit,controlCheck,notice;
 HWND browseButton,connectButton,disconnectButton,homeButton,switcherButton,volumeUpButton,volumeDownButton;
 HWND sendTextButton,bitrateLabel,rotateButton,fitButton,ratioCheck,sharpnessSlider,sharpnessLabel;
 HWND toggleToolbarButton;
+HWND videoWindow,vsyncCheck,fsrCheck;
 BufferedRenderer renderer;
+D3DRenderer gpuRenderer;
+bool advancedFailed=false;
 std::unique_ptr<Connection> connection;
 std::mutex frameMutex,statusMutex;
 struct DisplayFrame { VideoFrame pixels; int rotation=0; };
@@ -40,16 +44,16 @@ int viewWidth=750,viewHeight=1334;
 RECT sizingStart{};
 double lastX=0,lastY=0;
 ULONGLONG lastMove=0;
-enum {Config=10,Browse,Connect,Disconnect,Home,Switcher,VolumeUp,VolumeDown,SendText,Bitrate,Rotate,Fit,KeepRatio,Sharpness,ToggleToolbar};
+enum {Config=10,Browse,Connect,Disconnect,Home,Switcher,VolumeUp,VolumeDown,SendText,Bitrate,Rotate,Fit,KeepRatio,Sharpness,ToggleToolbar,VSync,FSR};
 int toolbarHeight() { return toolbarVisible?ExpandedToolbarHeight:0; }
 int minimumClientWidth() {
     int minimum=toolbarVisible?380:160;
     return keepRatio?std::max(minimum,static_cast<int>(std::ceil(120.0*viewWidth/viewHeight))):minimum;
 }
-std::array<HWND,20> toolbarControls() {
+std::array<HWND,22> toolbarControls() {
     return {configEdit,browseButton,connectButton,disconnectButton,controlCheck,homeButton,
             switcherButton,volumeUpButton,volumeDownButton,textEdit,sendTextButton,bitrateEdit,
-            bitrateLabel,rotateButton,fitButton,ratioCheck,sharpnessLabel,sharpnessSlider,notice,toggleToolbarButton};
+            bitrateLabel,rotateButton,fitButton,ratioCheck,sharpnessLabel,sharpnessSlider,notice,toggleToolbarButton,vsyncCheck,fsrCheck};
 }
 std::wstring wide(const std::string &text) {
     int size=MultiByteToWideChar(CP_UTF8,0,text.data(),static_cast<int>(text.size()),nullptr,0);
@@ -70,7 +74,10 @@ HWND control(const wchar_t *cls,const wchar_t *title,DWORD style,int x,int y,int
     SendMessageW(c,WM_SETFONT,reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)),TRUE); return c;
 }
 void layoutControls(int width) {
-    if(width<=0||!toolbarVisible) return;
+    if(width<=0) return;
+    RECT client{}; GetClientRect(window,&client);
+    if(videoWindow) MoveWindow(videoWindow,0,toolbarHeight(),width,std::max(1,static_cast<int>(client.bottom)-toolbarHeight()),TRUE);
+    if(!toolbarVisible) return;
     auto place=[](HWND child,int x,int y,int w,int h=24) { MoveWindow(child,x,y,std::max(1,w),h,TRUE); };
     place(configEdit,8,6,width-106); place(browseButton,width-92,6,84);
     place(connectButton,8,36,66); place(disconnectButton,80,36,76);
@@ -81,7 +88,8 @@ void layoutControls(int width) {
     place(textEdit,8,96,textWidth); place(sendTextButton,14+textWidth,96,70);
     place(bitrateEdit,90+textWidth,96,60); place(bitrateLabel,156+textWidth,100,40,20);
     place(ratioCheck,8,126,126); place(sharpnessLabel,140,130,78,20);
-    place(sharpnessSlider,218,123,width-226,28); place(notice,8,155,width-150,30);
+    place(sharpnessSlider,218,123,width-226,28); place(notice,8,185,width-16,30);
+    place(vsyncCheck,8,155,90); place(fsrCheck,104,155,100);
     place(toggleToolbarButton,width-134,155,126,26);
 }
 SIZE windowBorder(HWND hwnd) {
@@ -92,10 +100,10 @@ SIZE windowBorder(HWND hwnd) {
 }
 RECT videoArea() { RECT area{}; GetClientRect(window,&area); area.top=std::min<long>(toolbarHeight(),area.bottom); return area; }
 void setSharpness(int strength) {
-    sharpness=std::clamp(strength,0,100); renderer.setSharpening(sharpness);
+    sharpness=std::clamp(strength,0,100); renderer.setSharpening(sharpness); gpuRenderer.setSharpening(sharpness);
     SendMessageW(sharpnessSlider,TBM_SETPOS,TRUE,sharpness);
     SetWindowTextW(sharpnessLabel,(L"Sharp: "+std::to_wstring(sharpness)+L"%").c_str());
-    RECT area=videoArea(); InvalidateRect(window,&area,FALSE);
+    InvalidateRect(videoWindow,nullptr,FALSE);
 }
 VideoFrame rotate(VideoFrame input,int degrees) {
     if(degrees==0) return input;
@@ -178,7 +186,7 @@ void constrainSize(HWND hwnd,UINT edge,RECT &rect) {
 void disconnect() {
     endDrag(); if(connection) connection->close(); connection.reset();
     { std::lock_guard<std::mutex> lock(frameMutex); frame.reset(); }
-    InvalidateRect(window,nullptr,FALSE); SetWindowTextW(window,L"iOSRemoteBridge - disconnected");
+    InvalidateRect(videoWindow,nullptr,FALSE); SetWindowTextW(window,L"iOSRemoteBridge - disconnected");
 }
 void connectClient() {
     disconnect();
@@ -223,6 +231,37 @@ bool point(LPARAM position,double &x,double &y) {
     return irb_unrotate((px-videoRect.left)/(videoRect.right-videoRect.left),
                         (py-videoRect.top)/(videoRect.bottom-videoRect.top),presentedRotation,&x,&y)!=0;
 }
+LRESULT CALLBACK videoProcedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
+    if(message==WM_ERASEBKGND) return 1;
+    if(message==WM_LBUTTONDOWN||message==WM_LBUTTONUP||message==WM_MOUSEMOVE) {
+        POINT p{GET_X_LPARAM(l),GET_Y_LPARAM(l)}; MapWindowPoints(hwnd,window,&p,1);
+        return SendMessageW(window,message,w,MAKELPARAM(p.x,p.y));
+    }
+    if(message==WM_CONTEXTMENU) return SendMessageW(window,message,reinterpret_cast<WPARAM>(window),l);
+    if(message==WM_PAINT) {
+        PAINTSTRUCT paint; HDC dc=BeginPaint(hwnd,&paint); RECT area{}; GetClientRect(hwnd,&area);
+        std::shared_ptr<const DisplayFrame> shown;
+        { std::lock_guard<std::mutex> lock(frameMutex); shown=frame; }
+        const VideoFrame empty; const VideoFrame &pixels=shown?shown->pixels:empty;
+        RECT image{};
+        bool painted=gpuRenderer.paint(hwnd,area.right,area.bottom,pixels,image);
+        if(!painted) {
+            if(!advancedFailed) {
+                advancedFailed=true; EnableWindow(vsyncCheck,FALSE); EnableWindow(fsrCheck,FALSE);
+                SendMessageW(vsyncCheck,BM_SETCHECK,BST_UNCHECKED,0); SendMessageW(fsrCheck,BM_SETCHECK,BST_UNCHECKED,0);
+                SetWindowTextW(notice,L"Advanced display unavailable; using basic display.");
+                OutputDebugStringA(gpuRenderer.error().c_str());
+            }
+            painted=renderer.paint(dc,area.right,area.bottom,0,pixels,image);
+        }
+        if(painted) {
+            videoRect=image; MapWindowPoints(hwnd,window,reinterpret_cast<POINT *>(&videoRect),2);
+            presentedRotation=shown?shown->rotation:0;
+        } else videoRect={};
+        EndPaint(hwnd,&paint); return 0;
+    }
+    return DefWindowProcW(hwnd,message,w,l);
+}
 LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
     switch(message) {
     case WM_CREATE:
@@ -254,6 +293,10 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         SendMessageW(sharpnessSlider,TBM_SETPOS,TRUE,sharpness);
         notice=control(L"STATIC",L"Choose a pairing file, then connect.",SS_NOPREFIX,8,72,1000,22,0);
         toggleToolbarButton=control(L"BUTTON",L"Hide tools (F9)",0,0,0,126,26,ToggleToolbar);
+        vsyncCheck=control(L"BUTTON",L"VSync",BS_AUTOCHECKBOX,0,0,90,24,VSync);
+        fsrCheck=control(L"BUTTON",L"FSR 1",BS_AUTOCHECKBOX,0,0,100,24,FSR);
+        SendMessageW(vsyncCheck,BM_SETCHECK,BST_CHECKED,0);
+        videoWindow=CreateWindowW(L"iOSRemoteBridge.Video",L"",WS_CHILD|WS_VISIBLE|WS_CLIPSIBLINGS,0,0,1,1,hwnd,nullptr,GetModuleHandleW(nullptr),nullptr);
         AppendMenuW(GetSystemMenu(hwnd,FALSE),MF_SEPARATOR,0,nullptr);
         AppendMenuW(GetSystemMenu(hwnd,FALSE),MF_STRING|MF_CHECKED,ToggleToolbarSystem,L"Show toolbar\tF9");
         { RECT client{}; GetClientRect(hwnd,&client); layoutControls(client.right); }
@@ -275,6 +318,12 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         case Rotate: endDrag(); rotation=(rotation.load()+90)%360; return 0;
         case Fit: fitWindow(); return 0;
         case ToggleToolbar: setToolbarVisible(!toolbarVisible); return 0;
+        case VSync:
+            gpuRenderer.setVSync(SendMessageW(vsyncCheck,BM_GETCHECK,0,0)==BST_CHECKED);
+            InvalidateRect(videoWindow,nullptr,FALSE); return 0;
+        case FSR:
+            gpuRenderer.setFSR(SendMessageW(fsrCheck,BM_GETCHECK,0,0)==BST_CHECKED);
+            InvalidateRect(videoWindow,nullptr,FALSE); return 0;
         case KeepRatio:
             keepRatio=SendMessageW(ratioCheck,BM_GETCHECK,0,0)==BST_CHECKED;
             if(keepRatio) fitWindow(); return 0;
@@ -348,7 +397,7 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
             bool fit=keepRatio&&(fitNextFrame||changed); fitNextFrame=false;
             if(fit&&!IsZoomed(hwnd)&&!IsIconic(hwnd)) fitWindow();
         }
-        RECT area=videoArea(); InvalidateRect(hwnd,&area,FALSE); return 0;
+        InvalidateRect(videoWindow,nullptr,FALSE); return 0;
     }
     case StatusMessage: { std::lock_guard<std::mutex> lock(statusMutex); SetWindowTextW(hwnd,(L"iOSRemoteBridge | "+status).c_str()); return 0; }
     case ResponseMessage: { std::lock_guard<std::mutex> lock(statusMutex); SetWindowTextW(notice,wide(responseNotice).c_str()); return 0; }
@@ -367,16 +416,11 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
     case WM_ERASEBKGND: return 1; // Buffered WM_PAINT owns the entire client background.
     case WM_PAINT: {
         PAINTSTRUCT paint; HDC dc=BeginPaint(hwnd,&paint); RECT area; GetClientRect(hwnd,&area);
-        std::shared_ptr<const DisplayFrame> shown;
-        { std::lock_guard<std::mutex> lock(frameMutex); shown=frame; }
-        // Retain the displayed frame without blocking decoding during scale/sharpen.
-        const VideoFrame empty;
-        if(renderer.paint(dc,area.right,area.bottom,toolbarHeight(),shown?shown->pixels:empty,videoRect))
-            presentedRotation=shown?shown->rotation:0;
+        FillRect(dc,&area,GetSysColorBrush(COLOR_BTNFACE));
         EndPaint(hwnd,&paint); return 0;
     }
     case WM_CLOSE: disconnect(); DestroyWindow(hwnd); return 0;
-    case WM_DESTROY: renderer.reset(); PostQuitMessage(0); return 0;
+    case WM_DESTROY: gpuRenderer.reset(); renderer.reset(); PostQuitMessage(0); return 0;
     }
     return DefWindowProcW(hwnd,message,w,l);
 }
@@ -389,6 +433,9 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int show) {
     WNDCLASSW cls{}; cls.hInstance=instance; cls.lpfnWndProc=procedure; cls.lpszClassName=L"iOSRemoteBridge.Window";
     cls.hCursor=LoadCursor(nullptr,IDC_ARROW); cls.hbrBackground=nullptr;
     RegisterClassW(&cls);
+    WNDCLASSW videoClass{}; videoClass.hInstance=instance; videoClass.lpfnWndProc=videoProcedure;
+    videoClass.lpszClassName=L"iOSRemoteBridge.Video"; videoClass.hCursor=LoadCursor(nullptr,IDC_ARROW);
+    videoClass.style=CS_HREDRAW|CS_VREDRAW; RegisterClassW(&videoClass);
     HWND hwnd=CreateWindowW(cls.lpszClassName,L"iOSRemoteBridge - pair and connect",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,
                            CW_USEDEFAULT,CW_USEDEFAULT,460,950,nullptr,nullptr,instance,nullptr);
     if(!hwnd) { WSACleanup(); return 1; }
@@ -397,6 +444,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int show) {
         bool controls=GetDlgItem(hwnd,Config)&&GetDlgItem(hwnd,Connect)&&GetDlgItem(hwnd,Disconnect)&&
                       GetDlgItem(hwnd,SendText)&&GetDlgItem(hwnd,Fit)&&GetDlgItem(hwnd,Rotate)&&
                       GetDlgItem(hwnd,Sharpness)&&SendMessageW(sharpnessSlider,TBM_GETPOS,0,0)==40&&
+                      videoWindow&&SendMessageW(vsyncCheck,BM_GETCHECK,0,0)==BST_CHECKED&&
                       SendMessageW(ratioCheck,BM_GETCHECK,0,0)==BST_CHECKED&&
                       GetDlgItemInt(hwnd,Bitrate,nullptr,FALSE)==8000;
         for(int mode=0;mode<2;++mode) {

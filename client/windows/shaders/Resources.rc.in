@@ -1,0 +1,3 @@
+5001 RCDATA "@CMAKE_CURRENT_SOURCE_DIR@/shaders/Video.hlsl"
+5002 RCDATA "@CMAKE_CURRENT_SOURCE_DIR@/shaders/vendor/ffx_a.h"
+5003 RCDATA "@CMAKE_CURRENT_SOURCE_DIR@/shaders/vendor/ffx_fsr1.h"
