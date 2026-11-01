@@ -227,6 +227,10 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
 }
 - (void)fromBridge:(irb_header)h data:(NSData *)data {
     if(h.type==IRB_STOP) {
+        // disconnect: already cleared the connection before asking the bridge
+        // to stop. Its acknowledgement must not extend a normal reconnect delay
+        // to the cooldown reserved for a local stop or rejected approval.
+        if(!_connection) return;
         NSDictionary *stop=IRBDictionary(data); NSString *reason=[stop[@"reason"] isKindOfClass:NSString.class]?stop[@"reason"]:@"session stopped on iPhone";
         [self disconnect:reason]; _cooldown=IRBNow()+30000000; return;
     }

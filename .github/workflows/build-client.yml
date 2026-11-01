@@ -2,7 +2,7 @@ name: build-client
 on:
   push:
     branches: [main, 'feature/**']
-    paths: ['client/**', 'shared/**', 'vcpkg.json', 'CMakeLists.txt', 'tools/native_smoke.py', '.github/workflows/build-client.yml']
+    paths: ['client/**', 'shared/**', 'vcpkg.json', 'CMakeLists.txt', 'tools/native_smoke.py', 'tools/prepare_ffmpeg_port.py', '.github/workflows/build-client.yml']
   pull_request:
   workflow_dispatch:
 permissions:
