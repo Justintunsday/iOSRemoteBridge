@@ -232,6 +232,10 @@ Apple's [resource user client](https://github.com/apple-oss-distributions/IOHIDF
 checks `com.apple.hid.manager.user-access-device` when opening this service.
 The mobile daemon requests that entitlement; it is not attached to the injected
 dylib because a dylib cannot grant new entitlements to SpringBoard.
+The target also requires the narrow IOKit user-client exception for
+`IOHIDResourceDeviceUserClient`: without it the runtime entitlement was present,
+but IOServiceOpen returned `0xe00002e2` (not permitted). The same exception is
+listed in the target's system BTLEServer executable's entitlements.
 
 The report descriptor contains a keyboard, an absolute-position mouse collection
 and a relative mouse collection for native buttons/wheel. Pointer support and

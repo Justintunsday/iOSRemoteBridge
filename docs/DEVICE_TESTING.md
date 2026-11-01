@@ -75,7 +75,7 @@ HID delivery, sender discovery, volume and SpringBoard navigation handlers
 are experimental until these checks pass on iOS 16.1.1.
 
 For ASCII text, focus a test field and send an entire sentence with mixed case,
-digits, punctuation and a newline. Approve the separate prompt physically. A
+digits, punctuation and a newline. No separate approval prompt should appear. A
 key operation sends a single press/release pair, not an indefinitely held key.
 Unicode input returns an error. Verify remote touches cannot approve a pending
 sensitive-action prompt. Launch a harmless installed app by bundle ID and record

@@ -23,7 +23,8 @@ file authorizes viewing and requested control while unlocked.
   SpringBoard's process privileges. Signing a dylib with extra entitlements
   would not grant those entitlements to its host. The daemon requests platform-application and
   com.apple.hid.manager.user-access-device to create the native virtual HID
-  mouse/keyboard. PKCS12 import succeeded on the target; the exact necessity of
+  mouse/keyboard, plus the IOKit exception for IOHIDResourceDeviceUserClient.
+  PKCS12 import succeeded on the target; the exact necessity of
   platform-application has not been isolated. No protected-content,
   task-port or kernel-modification entitlements are added.
 - Network clients cannot reach the private Unix socket directly. Its mode is

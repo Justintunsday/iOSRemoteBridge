@@ -3,4 +3,6 @@
 <plist version="1.0"><dict>
   <key>platform-application</key><true/>
   <key>com.apple.hid.manager.user-access-device</key><true/>
+  <key>com.apple.security.exception.iokit-user-client-class</key>
+  <array><string>IOHIDResourceDeviceUserClient</string></array>
 </dict></plist>
