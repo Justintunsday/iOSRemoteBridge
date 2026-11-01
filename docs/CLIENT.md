@@ -29,7 +29,8 @@ selecting 60 does not establish that 60 frames were captured or displayed.
 
 Keyboard shortcuts: F1 rotates clockwise; F2 requests 30 FPS; F3 requests 60;
 F4 requests half resolution; F5 requests native resolution; F6 fits the window
-to the device screen on the current monitor; Ctrl+T focuses the
+to the device screen on the current monitor; F7/F8 decrease/increase sharpening
+by 10 percentage points; Ctrl+T focuses the
 text field; Esc disconnects. Enter in the kbps field changes the bitrate.
 Quality changes are applied at a frame boundary. A second simultaneous quality
 change can return a busy error; retry after the first completes.
@@ -41,6 +42,13 @@ remains proportional with letterboxing. Fit/F6 fits the image within the current
 monitor's work area, with room for the toolbar and window borders. On a small
 display the minimum toolbar width can require a little letterboxing. The
 toolbar reflows into compact rows so controls stay visible in portrait mode.
+
+The Sharp slider adjusts local edge sharpening from 0–100%, starting at 40%.
+Zero disables it. The filter runs after resizing, uses a small luma unsharp mask
+and limits halos. Flat colors and channel differences are preserved; the control
+does not change exposure, gamma, encoder quality or phone settings. The selected
+strength lasts for the current viewer process. Decoding hands off immutable
+frames so sharpening does not hold the decoder's frame mutex.
 
 Statistics show decoded FPS, **network round-trip time**, last decode time and
 the selected decoder. RTT is not end-to-end display latency. D3D11VA is attempted

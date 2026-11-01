@@ -137,9 +137,53 @@ samples, not per-frame percentile distributions. SpringBoard resident memory
 ranged 169,426,944–174,030,848 bytes in the 30-FPS window and 169,132,032 bytes
 in the 60-FPS window; it includes the entire SpringBoard process and its other
 tweaks. Content and run durations were not controlled for a sustained benchmark.
-**The native 60-FPS target was not achieved.** One-frame credit serializes
+**That version did not achieve the native 60-FPS target.** One-frame credit serializes
 capture/encode/transfer/ack, and display-link ticks can be skipped while that
-cycle is outstanding. More throughput work and longer measurements are needed.
+cycle is outstanding.
+
+## Three-frame pipeline and corrected colors
+
+The updated phone package at `120d772704e39b184fc6c998ada84fb156ea7b18`, from
+[iOS build 41291465234](https://github.com/Justintunsday/iOSRemoteBridge/actions/runs/41291465234),
+was installed and SpringBoard reloaded. It negotiates three ordered frame slots
+and permits two overlapping encoder submissions. The owner unlocked the phone
+and approved each new test session. Native-resolution telemetry reported
+750x1334, Low Power Mode off and nominal thermal state.
+
+| Requested FPS | Positive-counter interval | Encoded FPS over interval | Last-capture sample range | Last-encode sample range | Capture-to-ack EWMA range |
+| --- | --- | --- | --- | --- | --- |
+| 60 | 17.282 s | 59.95 | 3.976–6.583 ms | 10.062–10.715 ms | 20.326–30.791 ms |
+| 30 | 8.128 s | 30.02 | 6.969–7.749 ms | 10.893–12.094 ms | 24.879–26.220 ms |
+
+The Python client consumes encoded frames without decoding/displaying them. The
+30-FPS configuration followed the 60-FPS sample in the same approved session;
+the pipeline drained and restarted successfully. SpringBoard resident memory
+ranged 122,798,080–123,076,608 bytes at 60 FPS and 124,403,712–124,452,864 bytes
+at 30 FPS. These are whole-process samples, not isolated bridge allocations.
+They are short telemetry windows, not per-frame traces or a thermal soak.
+
+The Windows client at `ae2477818b6230ebffd5d3e5ede318c3a1395d43`, from
+[Windows build 41291645892](https://github.com/Justintunsday/iOSRemoteBridge/actions/runs/41291645892),
+preserves color properties on GPU download and explicitly applies full/limited
+range and the source matrix with accurate conversion. The phone stream reports
+full-range YUV; treating downloaded NV12 as limited range had clipped highlights.
+Encoded full/limited grayscale fixtures passed on this PC with both software
+and D3D11VA decoding (maximum channel errors 2 and 3 levels respectively).
+For a private native-resolution phone IDR, software and D3D11VA RGB output matched
+exactly (mean and maximum error zero). Private screen pixels remain local.
+
+The new live Windows viewer was opened, approved on the phone, and sampled
+once per second. After omitting two startup readings, 14 title readings averaged
+**59.86 decoded FPS** (range 58.0–60.6) and 7.86 ms decode/conversion/handoff time.
+The decoder reported D3D11VA. Title counters are sampled estimates; a reading
+above 60 does not establish more than 60 physically displayed frames per second.
+These samples precede the optional post-scale sharpening filter.
+
+After watching the live viewer, the owner reported **"Colors look correct and
+motion is smoother."** This confirms the reported visual improvement in that
+session. Physical monitor scanout, glass-to-glass latency, hardware encoder use,
+long-duration 60-FPS stability and battery use remain unverified. No new capture
+or acknowledgement timeout was observed during these short tests.
 
 ## Remaining validation
 

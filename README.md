@@ -14,6 +14,8 @@ initial input failure.** See the
 [dated device report](docs/DEVICE_VALIDATION_2026-11-01.md) for exact commits,
 short measurements and remaining gates. Sustained 60 FPS, hardware encoder use,
 glass-to-glass latency and long-term power/stability are not verified.
+After bounded pipelining, a short Windows sample averaged 59.86 decoded FPS.
+The owner confirmed corrected colors and smoother motion; see the report's limits.
 
 ## Implemented
 
@@ -25,7 +27,8 @@ glass-to-glass latency and long-term power/stability are not verified.
 - System-HID multi-contact API, gestures, paced US-layout ASCII text, keyboard
   presses, Home/App Switcher, volume and experimental app launch.
 - Native Win32 receiver with D3D11VA selection/software fallback, mouse/text
-  control, rotation, quality controls, reconnect and FPS/RTT/decode statistics.
+  control, rotation, aspect fitting, adjustable sharpening, quality controls,
+  reconnect and FPS/RTT/decode statistics.
 - Python API/CLI, JSON-lines adapter and optional standard MCP stdio tools.
 - GitHub Actions builds, TLS/H.264 simulator tests, validation, logs/artifacts
   and a manually gated draft-release workflow.

@@ -96,6 +96,15 @@ optional standard MCP adapter uses the pinned official Python SDK and exposes
 screen-image and authorized-input tools over stdio, without a local network port.
 The implementation has no required Mac after package installation and pairing.
 
+Windows composes each paint in a persistent top-down DIB, scales the video, then
+optionally applies a 0–100% luma unsharp mask (default 40%) before one final blit.
+Three reusable original-luma rows allow in-place filtering. The edge adjustment
+is capped at 16 levels and constrained by all three channels' remaining range;
+flat tones, alpha, letterboxing and channel differences remain unchanged. GDI
+writes are flushed before CPU access. The UI retains an immutable frame snapshot
+without holding the handoff mutex during painting. Input rotation matches that
+painted snapshot rather than a newer pending frame.
+
 Modules are separated under ios/capture, encoder, input, common and daemon;
 client decoder and connection modules are independent. CI tests production
 framing, command validation, certificate pin rejection, H.264 decode and TLS/RPC

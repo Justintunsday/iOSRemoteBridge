@@ -4,6 +4,7 @@
 #include "BufferedRenderer.h"
 #include <windowsx.h>
 #include <commdlg.h>
+#include <commctrl.h>
 #include <shellapi.h>
 #include <fstream>
 #include <filesystem>
@@ -14,19 +15,20 @@
 using json=nlohmann::json;
 namespace {
 constexpr UINT FrameMessage=WM_APP+1,StatusMessage=WM_APP+2,ResponseMessage=WM_APP+3;
-constexpr int ToolbarHeight=170,MinimumClientWidth=380;
+constexpr int ToolbarHeight=190,MinimumClientWidth=380;
 HWND window,configEdit,textEdit,bitrateEdit,controlCheck,notice;
 HWND browseButton,connectButton,disconnectButton,homeButton,switcherButton,volumeUpButton,volumeDownButton;
-HWND sendTextButton,bitrateLabel,rotateButton,fitButton,ratioCheck;
+HWND sendTextButton,bitrateLabel,rotateButton,fitButton,ratioCheck,sharpnessSlider,sharpnessLabel;
 BufferedRenderer renderer;
 std::unique_ptr<Connection> connection;
 std::mutex frameMutex,statusMutex;
-VideoFrame frame;
+struct DisplayFrame { VideoFrame pixels; int rotation=0; };
+std::shared_ptr<const DisplayFrame> frame;
 std::wstring status;
 std::string responseNotice;
 std::atomic<int> rotation{0};
 std::atomic<bool> framePosted{false};
-int frameRotation=0,currentFPS=60;
+int presentedRotation=0,currentFPS=60,sharpness=40;
 double currentScale=1;
 RECT videoRect{};
 bool dragging=false;
@@ -35,7 +37,7 @@ int viewWidth=750,viewHeight=1334;
 RECT sizingStart{};
 double lastX=0,lastY=0;
 ULONGLONG lastMove=0;
-enum {Config=10,Browse,Connect,Disconnect,Home,Switcher,VolumeUp,VolumeDown,SendText,Bitrate,Rotate,Fit,KeepRatio};
+enum {Config=10,Browse,Connect,Disconnect,Home,Switcher,VolumeUp,VolumeDown,SendText,Bitrate,Rotate,Fit,KeepRatio,Sharpness};
 std::wstring wide(const std::string &text) {
     int size=MultiByteToWideChar(CP_UTF8,0,text.data(),static_cast<int>(text.size()),nullptr,0);
     std::wstring out(static_cast<size_t>(size),L'\0');
@@ -65,7 +67,8 @@ void layoutControls(int width) {
     int textWidth=width-204;
     place(textEdit,8,96,textWidth); place(sendTextButton,14+textWidth,96,70);
     place(bitrateEdit,90+textWidth,96,60); place(bitrateLabel,156+textWidth,100,40,20);
-    place(ratioCheck,8,126,126); place(notice,140,126,width-148,38);
+    place(ratioCheck,8,126,126); place(sharpnessLabel,140,130,78,20);
+    place(sharpnessSlider,218,123,width-226,28); place(notice,8,155,width-16,30);
 }
 SIZE windowBorder(HWND hwnd) {
     RECT rect{};
@@ -74,6 +77,12 @@ SIZE windowBorder(HWND hwnd) {
     return {rect.right-rect.left,rect.bottom-rect.top};
 }
 RECT videoArea() { RECT area{}; GetClientRect(window,&area); area.top=std::min<long>(ToolbarHeight,area.bottom); return area; }
+void setSharpness(int strength) {
+    sharpness=std::clamp(strength,0,100); renderer.setSharpening(sharpness);
+    SendMessageW(sharpnessSlider,TBM_SETPOS,TRUE,sharpness);
+    SetWindowTextW(sharpnessLabel,(L"Sharp: "+std::to_wstring(sharpness)+L"%").c_str());
+    RECT area=videoArea(); InvalidateRect(window,&area,FALSE);
+}
 VideoFrame rotate(VideoFrame input,int degrees) {
     if(degrees==0) return input;
     VideoFrame output;
@@ -134,7 +143,7 @@ void constrainSize(HWND hwnd,UINT edge,RECT &rect) {
 }
 void disconnect() {
     endDrag(); if(connection) connection->close(); connection.reset();
-    { std::lock_guard<std::mutex> lock(frameMutex); frame=VideoFrame{}; }
+    { std::lock_guard<std::mutex> lock(frameMutex); frame.reset(); }
     InvalidateRect(window,nullptr,FALSE); SetWindowTextW(window,L"iOSRemoteBridge - disconnected");
 }
 void connectClient() {
@@ -147,8 +156,10 @@ void connectClient() {
         bool wantsControl=SendMessageW(controlCheck,BM_GETCHECK,0,0)==BST_CHECKED;
         connection=std::make_unique<Connection>(config,wantsControl,currentFPS);
         connection->onFrame=[](VideoFrame &&source) {
-            int r=rotation.load(); VideoFrame shown=rotate(std::move(source),r);
-            { std::lock_guard<std::mutex> lock(frameMutex); frame=std::move(shown); frameRotation=r; }
+            int r=rotation.load();
+            auto shown=std::make_shared<DisplayFrame>();
+            shown->pixels=rotate(std::move(source),r); shown->rotation=r;
+            { std::lock_guard<std::mutex> lock(frameMutex); frame=std::move(shown); }
             if(!framePosted.exchange(true)) PostMessageW(window,FrameMessage,0,0);
         };
         connection->onStatus=[](const std::string &message) {
@@ -175,16 +186,15 @@ bool point(LPARAM position,double &x,double &y) {
     double px=GET_X_LPARAM(position),py=GET_Y_LPARAM(position);
     if(videoRect.right<=videoRect.left||videoRect.bottom<=videoRect.top) return false;
     if(px<videoRect.left||px>videoRect.right||py<videoRect.top||py>videoRect.bottom) return false;
-    int r; { std::lock_guard<std::mutex> lock(frameMutex); r=frameRotation; }
     return irb_unrotate((px-videoRect.left)/(videoRect.right-videoRect.left),
-                        (py-videoRect.top)/(videoRect.bottom-videoRect.top),r,&x,&y)!=0;
+                        (py-videoRect.top)/(videoRect.bottom-videoRect.top),presentedRotation,&x,&y)!=0;
 }
 LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
     switch(message) {
     case WM_CREATE:
         window=hwnd;
         configEdit=control(L"EDIT",L"client-config.json",WS_BORDER|ES_AUTOHSCROLL,8,8,410,25,Config);
-        browseButton=control(L"BUTTON",L"Pairing file...",0,424,8,98,25,Browse);
+        browseButton=control(L"BUTTON",L"Browse...",0,424,8,98,25,Browse);
         connectButton=control(L"BUTTON",L"Connect",0,528,8,72,25,Connect);
         disconnectButton=control(L"BUTTON",L"Disconnect",0,606,8,82,25,Disconnect);
         controlCheck=control(L"BUTTON",L"Request control",BS_AUTOCHECKBOX,700,8,135,25,0);
@@ -202,6 +212,12 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         fitButton=control(L"BUTTON",L"Fit",0,0,0,54,24,Fit);
         ratioCheck=control(L"BUTTON",L"Keep ratio",BS_AUTOCHECKBOX,0,0,126,24,KeepRatio);
         SendMessageW(ratioCheck,BM_SETCHECK,BST_CHECKED,0);
+        sharpnessLabel=control(L"STATIC",L"Sharp: 40%",0,0,0,78,20,0);
+        sharpnessSlider=control(TRACKBAR_CLASSW,L"Sharpening",TBS_HORZ|TBS_NOTICKS|TBS_TOOLTIPS|WS_TABSTOP,0,0,100,28,Sharpness);
+        SendMessageW(sharpnessSlider,TBM_SETRANGE,TRUE,MAKELPARAM(0,100));
+        SendMessageW(sharpnessSlider,TBM_SETLINESIZE,0,5);
+        SendMessageW(sharpnessSlider,TBM_SETPAGESIZE,0,10);
+        SendMessageW(sharpnessSlider,TBM_SETPOS,TRUE,sharpness);
         notice=control(L"STATIC",L"Choose a pairing file, then connect.",SS_NOPREFIX,8,72,1000,22,0);
         { RECT client{}; GetClientRect(hwnd,&client); layoutControls(client.right); }
         return 0;
@@ -225,6 +241,11 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
             keepRatio=SendMessageW(ratioCheck,BM_GETCHECK,0,0)==BST_CHECKED;
             if(keepRatio) fitWindow(); return 0;
         } break;
+    case WM_HSCROLL:
+        if(reinterpret_cast<HWND>(l)==sharpnessSlider) {
+            setSharpness(static_cast<int>(SendMessageW(sharpnessSlider,TBM_GETPOS,0,0))); return 0;
+        }
+        break;
     case WM_KEYDOWN:
         if(w==VK_ESCAPE) { disconnect(); return 0; }
         if(w==VK_F1) { endDrag(); rotation=(rotation.load()+90)%360; return 0; }
@@ -233,6 +254,8 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         if(w==VK_F4) { configure(currentFPS,.5); return 0; }
         if(w==VK_F5) { configure(currentFPS,1); return 0; }
         if(w==VK_F6) { fitWindow(); return 0; }
+        if(w==VK_F7) { setSharpness(sharpness-10); return 0; }
+        if(w==VK_F8) { setSharpness(sharpness+10); return 0; }
         if(w==VK_RETURN&&GetFocus()==bitrateEdit) { command({{"op","configure"},{"bitrate",GetDlgItemInt(hwnd,Bitrate,nullptr,FALSE)*1000}}); return 0; }
         if((GetKeyState(VK_CONTROL)&0x8000)&&w=='T') { SetFocus(textEdit); return 0; }
         if(w>=VK_LEFT&&w<=VK_DOWN) {
@@ -257,7 +280,7 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
     case FrameMessage: {
         framePosted=false;
         int width,height;
-        { std::lock_guard<std::mutex> lock(frameMutex); width=frame.width; height=frame.height; }
+        { std::lock_guard<std::mutex> lock(frameMutex); width=frame?frame->pixels.width:0; height=frame?frame->pixels.height:0; }
         if(width>0&&height>0) {
             bool changed=static_cast<int64_t>(width)*viewHeight!=static_cast<int64_t>(height)*viewWidth;
             viewWidth=width; viewHeight=height;
@@ -283,8 +306,12 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
     case WM_ERASEBKGND: return 1; // Buffered WM_PAINT owns the entire client background.
     case WM_PAINT: {
         PAINTSTRUCT paint; HDC dc=BeginPaint(hwnd,&paint); RECT area; GetClientRect(hwnd,&area);
-        std::lock_guard<std::mutex> lock(frameMutex);
-        renderer.paint(dc,area.right,area.bottom,ToolbarHeight,frame,videoRect);
+        std::shared_ptr<const DisplayFrame> shown;
+        { std::lock_guard<std::mutex> lock(frameMutex); shown=frame; }
+        // Retain the displayed frame without blocking decoding during scale/sharpen.
+        const VideoFrame empty;
+        if(renderer.paint(dc,area.right,area.bottom,ToolbarHeight,shown?shown->pixels:empty,videoRect))
+            presentedRotation=shown?shown->rotation:0;
         EndPaint(hwnd,&paint); return 0;
     }
     case WM_CLOSE: disconnect(); DestroyWindow(hwnd); return 0;
@@ -296,6 +323,8 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
 int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int show) {
     WSADATA data; if(WSAStartup(MAKEWORD(2,2),&data)) return 1;
     SetProcessDPIAware();
+    INITCOMMONCONTROLSEX common{sizeof(INITCOMMONCONTROLSEX),ICC_BAR_CLASSES};
+    if(!InitCommonControlsEx(&common)) { WSACleanup(); return 1; }
     WNDCLASSW cls{}; cls.hInstance=instance; cls.lpfnWndProc=procedure; cls.lpszClassName=L"iOSRemoteBridge.Window";
     cls.hCursor=LoadCursor(nullptr,IDC_ARROW); cls.hbrBackground=nullptr;
     RegisterClassW(&cls);
@@ -306,6 +335,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int show) {
     if(argv&&argc>1&&std::wstring(argv[1])==L"--self-test-ui") {
         bool controls=GetDlgItem(hwnd,Config)&&GetDlgItem(hwnd,Connect)&&GetDlgItem(hwnd,Disconnect)&&
                       GetDlgItem(hwnd,SendText)&&GetDlgItem(hwnd,Fit)&&GetDlgItem(hwnd,Rotate)&&
+                      GetDlgItem(hwnd,Sharpness)&&SendMessageW(sharpnessSlider,TBM_GETPOS,0,0)==40&&
                       SendMessageW(ratioCheck,BM_GETCHECK,0,0)==BST_CHECKED&&
                       GetDlgItemInt(hwnd,Bitrate,nullptr,FALSE)==8000;
         for(int r=0;r<2;++r) {
@@ -330,7 +360,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int show) {
     MSG message;
     while(GetMessageW(&message,nullptr,0,0)>0) {
         bool shortcut=message.message==WM_KEYDOWN&&(message.wParam==VK_ESCAPE||
-                      (message.wParam>=VK_F1&&message.wParam<=VK_F6)||
+                      (message.wParam>=VK_F1&&message.wParam<=VK_F8)||
                       ((GetKeyState(VK_CONTROL)&0x8000)&&message.wParam=='T')||
                       (message.wParam==VK_RETURN&&GetFocus()==bitrateEdit));
         if(shortcut) SendMessageW(hwnd,message.message,message.wParam,message.lParam);

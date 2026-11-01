@@ -8,8 +8,13 @@ Later matched-path Python samples on the input-fix package reached 23.73 encoded
 FPS at 30 requested and 25.04 at 60 requested, over 7.376/8.186 seconds respectively.
 Those measurements used the original one-frame pipeline. The native 60-FPS
 objective was not achieved in that version; see the report's method and ranges.
-The current pipeline negotiates up to three frame slots and overlaps two encoder
-submissions. New target-device measurements are required before claiming a gain.
+The revised pipeline negotiates up to three frame slots and overlaps two encoder
+submissions. A subsequent native-resolution Python sample reached 59.95 encoded
+FPS over 17.282 seconds at 60 requested, and 30.02 over 8.128 seconds at 30
+requested. A separate D3D11VA Windows playback sample averaged 59.86 decoded FPS
+across 14 one-second title readings (range 58.0–60.6; not a physical display count).
+Those Windows samples precede the optional sharpening filter. See the report for
+exact build identifiers and sample limits; this is not sustained 60-FPS evidence.
 CI separately validates compilation, protocol behavior and synthetic H.264 decode.
 Hardware encoder use, glass-to-glass latency, input latency, sustained thermal
 stability and battery consumption remain unmeasured.
@@ -49,8 +54,8 @@ selecting a production transport. Merely raising a timer to 60 does not prove
 Run a supervised device session using:
 
 ```powershell
-python -m tools.benchmark --config credentials/pairing/client-config.json --fps 30 --seconds 120 --output out/metrics-30.jsonl
-python -m tools.benchmark --config credentials/pairing/client-config.json --fps 60 --seconds 120 --output out/metrics-60.jsonl
+python -m tools.benchmark --config credentials/pairing/client-config.json --fps 30 --video-window 3 --seconds 120 --output out/metrics-30.jsonl
+python -m tools.benchmark --config credentials/pairing/client-config.json --fps 60 --video-window 3 --seconds 120 --output out/metrics-60.jsonl
 ```
 
 Each run requires local approval. Repeat at the same brightness, Wi-Fi band,

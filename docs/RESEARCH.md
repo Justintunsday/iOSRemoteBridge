@@ -211,5 +211,12 @@ near-white values; hardware/software comparisons can use a private device frame.
 The one-frame capture/encode/transfer/decode/ack dependency limited measured
 throughput. The revised protocol negotiates at most three ordered frame credits,
 overlaps at most two encoder submissions, and drains before reconfiguration.
-This keeps the window bounded while allowing stages to overlap. It is a source
-change requiring new physical FPS/latency measurements, not proof of 60 FPS.
+This keeps the window bounded while allowing stages to overlap. Short physical
+encoded/decoded FPS samples are recorded in the device report; sustained playback
+and physical display latency still require longer/external measurements.
+
+Windows sharpening modifies the offscreen DIB only after scaling. Microsoft's
+[CreateDIBSection documentation](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-createdibsection)
+requires synchronization with GDI drawing before direct pixel access, so the
+renderer calls GdiFlush before the CPU filter. The adjustable strength uses a
+standard [trackbar](https://learn.microsoft.com/en-us/windows/win32/controls/trackbar-controls).

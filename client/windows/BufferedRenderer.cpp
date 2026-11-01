@@ -7,8 +7,9 @@ void BufferedRenderer::reset() {
     if(buffer_&&original_) SelectObject(buffer_,original_);
     if(bitmap_) DeleteObject(bitmap_);
     if(buffer_) DeleteDC(buffer_);
-    buffer_=nullptr; bitmap_=nullptr; original_=nullptr; width_=height_=0;
+    buffer_=nullptr; bitmap_=nullptr; original_=nullptr; pixels_=nullptr; width_=height_=0;
 }
+void BufferedRenderer::setSharpening(int strength) { sharpening_=std::clamp(strength,0,100); }
 bool BufferedRenderer::resize(HDC target,int width,int height) {
     if(width<=0||height<=0) return false;
     if(buffer_&&width_==width&&height_==height) return true;
@@ -23,6 +24,7 @@ bool BufferedRenderer::resize(HDC target,int width,int height) {
     HGDIOBJ original=SelectObject(next,bitmap);
     if(!original||original==HGDI_ERROR) { DeleteObject(bitmap); DeleteDC(next); return false; }
     reset(); buffer_=next; bitmap_=bitmap; original_=original; width_=width; height_=height;
+    pixels_=static_cast<uint8_t *>(pixels);
     return true;
 }
 bool BufferedRenderer::paint(HDC target,int width,int height,int videoTop,const VideoFrame &frame,RECT &videoRect) {
@@ -48,6 +50,13 @@ bool BufferedRenderer::paint(HDC target,int width,int height,int videoTop,const 
                                frame.bgra.data(),&info,DIB_RGB_COLORS,SRCCOPY);
         if(!lines||lines==GDI_ERROR) return false;
         videoRect={left,top,left+shownWidth,top+shownHeight};
+        if(sharpening_) {
+            // Complete GDI writes before accessing DIB memory. Sharpen only the
+            // scaled video, then present once, preserving flicker-free painting.
+            GdiFlush();
+            sharpen_.apply(pixels_+(static_cast<size_t>(top)*width_+left)*4,
+                           static_cast<size_t>(width_)*4,shownWidth,shownHeight,sharpening_);
+        }
     }
     return BitBlt(target,0,0,width,height,buffer_,0,0,SRCCOPY)!=FALSE;
 }

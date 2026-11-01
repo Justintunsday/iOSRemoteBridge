@@ -9,14 +9,15 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--config", required=True)
     p.add_argument("--fps", type=int, choices=(30, 60), default=30)
+    p.add_argument("--video-window", type=int, choices=(1, 2, 3), default=3)
     p.add_argument("--seconds", type=int, default=120)
     p.add_argument("--output", required=True)
     args = p.parse_args()
     if not 1 <= args.seconds <= 600: p.error("seconds must be 1..600")
     output = Path(args.output); output.parent.mkdir(parents=True, exist_ok=True)
-    with BridgeClient(args.config, fps=args.fps) as client, output.open("x", encoding="utf-8") as stream:
+    with BridgeClient(args.config, fps=args.fps, video_window=args.video_window) as client, output.open("x", encoding="utf-8") as stream:
         start = time.monotonic()
-        stream.write(json.dumps({"device": client.device, "requested_fps": args.fps,
+        stream.write(json.dumps({"device": client.device, "requested_fps": args.fps, "requested_video_window": args.video_window,
                                  "client_path": "Python encoded-frame consumer; no video decode/display"}) + "\n")
         while time.monotonic() - start < args.seconds:
             stats = client.request("get_performance_stats")
