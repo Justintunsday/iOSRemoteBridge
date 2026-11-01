@@ -26,6 +26,7 @@ def scenario(wrong_pin):
         context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.minimum_version=ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(pairing/'server.crt',pairing/'server.key')
         observed={'auth':False,'credits':[],'operations':[],'error':None}
+        all_credits=threading.Event()
         def server():
             try:
                 raw,_=listener.accept()
@@ -48,7 +49,9 @@ def scenario(wrong_pin):
                         h=wire.unpack(wire.recv_exact(sock,24));body=wire.recv_exact(sock,h.length);rx+=1
                         if h.sequence!=rx: raise ValueError('client sequence mismatch')
                         if h.kind==wire.PING:send(wire.PONG,body,h.pts_us)
-                        elif h.kind==wire.CREDIT:observed['credits'].append(h.pts_us)
+                        elif h.kind==wire.CREDIT:
+                            observed['credits'].append(h.pts_us)
+                            if len(observed['credits'])>=3:all_credits.set()
                         elif h.kind==wire.CONTROL:
                             request=json.loads(body);observed['operations'].append({k:v for k,v in request.items() if k!='text'})
                             send(wire.RESPONSE,{'id':request['id'],'op':request['op'],'ok':True,'result':{'state':'submitted'}})
@@ -65,10 +68,12 @@ def scenario(wrong_pin):
         while not result_path.exists() and time.monotonic()<deadline:time.sleep(.25)
         if not result_path.exists():
             sim('io',SIMULATOR,'screenshot',str(LOGS/f'controller-{name}-timeout.png'),check=False)
-            sim('spawn',SIMULATOR,'log','show','--last','2m','--predicate',f'process == "iOSRemoteBridge"',check=False)
+            diagnostics=sim('spawn',SIMULATOR,'log','show','--last','2m','--predicate',f'process == "iOSRemoteBridge"',check=False)
+            (LOGS/f'controller-{name}-timeout.log').write_text(diagnostics.stdout+'\n'+diagnostics.stderr)
             raise AssertionError(f'{name}: no simulator test result')
         result=json.loads(result_path.read_text());(LOGS/f'controller-{name}.json').write_text(json.dumps(result,indent=2))
         sim('io',SIMULATOR,'screenshot',str(LOGS/f'controller-{name}.png'),check=False)
+        if result['passed'] and not wrong_pin:all_credits.wait(timeout=5)
         sim('terminate',SIMULATOR,BUNDLE,check=False);listener.close();thread.join(timeout=3)
         assert result['passed'],result
         if wrong_pin:assert not observed['auth'],'credentials were sent before certificate verification'

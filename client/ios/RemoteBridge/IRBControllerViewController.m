@@ -24,7 +24,9 @@
 }
 - (UITextField *)field:(NSString *)placeholder {
     UITextField *field=[UITextField new];field.placeholder=placeholder;field.borderStyle=UITextBorderStyleRoundedRect;
-    field.autocorrectionType=UITextAutocorrectionTypeNo;field.autocapitalizationType=UITextAutocapitalizationTypeNone;field.delegate=self;return field;
+    field.autocorrectionType=UITextAutocorrectionTypeNo;field.autocapitalizationType=UITextAutocapitalizationTypeNone;
+    field.smartQuotesType=UITextSmartQuotesTypeNo;field.smartDashesType=UITextSmartDashesTypeNo;field.spellCheckingType=UITextSpellCheckingTypeNo;
+    field.delegate=self;return field;
 }
 - (void)viewDidLoad {
     [super viewDidLoad];self.view.backgroundColor=UIColor.systemBackgroundColor;self.view.tintColor=[UIColor colorWithRed:.1 green:.48 blue:.94 alpha:1];
@@ -43,11 +45,11 @@
     _status.text=_profile?@"配对已保存，连接前请解锁被控手机":@"导入 client-config.json 后即可连接";[_root addArrangedSubview:_status];
     _editingSpacer=[UIView new];_editingSpacer.hidden=YES;[_root addArrangedSubview:_editingSpacer];
     _stats=[UILabel new];_stats.font=[UIFont monospacedDigitSystemFontOfSize:11 weight:UIFontWeightRegular];_stats.textColor=UIColor.secondaryLabelColor;_stats.text=@"视频尚未连接";[_root addArrangedSubview:_stats];
-    _videoView=[IRBVideoView new];[_root addArrangedSubview:_videoView];[_videoView.heightAnchor constraintGreaterThanOrEqualToConstant:60].active=YES;
+    _videoView=[IRBVideoView new];[_root addArrangedSubview:_videoView];NSLayoutConstraint *minimumVideoHeight=[_videoView.heightAnchor constraintGreaterThanOrEqualToConstant:60];minimumVideoHeight.priority=999;minimumVideoHeight.active=YES;
     [_videoView setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisVertical];
     _fullScreen=[self button:@"全屏" symbol:@"arrow.up.left.and.arrow.down.right" action:@selector(toggleFullscreen)];_fullScreen.backgroundColor=[UIColor colorWithWhite:.12 alpha:.8];_fullScreen.tintColor=UIColor.whiteColor;_fullScreen.layer.cornerRadius=12;
     _fullScreen.translatesAutoresizingMaskIntoConstraints=NO;[_videoView addSubview:_fullScreen];[NSLayoutConstraint activateConstraints:@[[_fullScreen.topAnchor constraintEqualToAnchor:_videoView.topAnchor constant:8],[_fullScreen.trailingAnchor constraintEqualToAnchor:_videoView.trailingAnchor constant:-8]]];
-    _tools=[UIScrollView new];_tools.showsHorizontalScrollIndicator=NO;[_tools.heightAnchor constraintEqualToConstant:58].active=YES;
+    _tools=[UIScrollView new];_tools.showsHorizontalScrollIndicator=NO;NSLayoutConstraint *toolsHeight=[_tools.heightAnchor constraintEqualToConstant:58];toolsHeight.priority=999;toolsHeight.active=YES;
     UIStackView *toolRow=[UIStackView new];toolRow.spacing=3;toolRow.translatesAutoresizingMaskIntoConstraints=NO;[_tools addSubview:toolRow];
     [NSLayoutConstraint activateConstraints:@[[toolRow.leadingAnchor constraintEqualToAnchor:_tools.contentLayoutGuide.leadingAnchor],[toolRow.trailingAnchor constraintEqualToAnchor:_tools.contentLayoutGuide.trailingAnchor],[toolRow.topAnchor constraintEqualToAnchor:_tools.contentLayoutGuide.topAnchor],[toolRow.bottomAnchor constraintEqualToAnchor:_tools.contentLayoutGuide.bottomAnchor],[toolRow.heightAnchor constraintEqualToAnchor:_tools.frameLayoutGuide.heightAnchor]]];
     NSArray *titles=@[@"主屏幕",@"切换器",@"控制中心",@"音量−",@"音量＋",@"文字",@"画质"];

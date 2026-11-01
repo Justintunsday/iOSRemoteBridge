@@ -6,7 +6,7 @@ file(GLOB CONTROLLER_SOURCES CONFIGURE_DEPENDS RemoteBridge/*.m RemoteBridge/*.h
 add_executable(iOSRemoteBridge MACOSX_BUNDLE ${CONTROLLER_SOURCES} Assets.xcassets)
 set_source_files_properties(Assets.xcassets PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
 target_compile_options(iOSRemoteBridge PRIVATE -fobjc-arc -Wall -Wextra -Wno-deprecated-declarations)
-foreach(FRAMEWORK UIKit Foundation Network Security VideoToolbox CoreMedia CoreVideo AVFoundation QuartzCore UniformTypeIdentifiers)
+foreach(FRAMEWORK UIKit Foundation Network Security VideoToolbox CoreMedia CoreVideo CoreGraphics AVFoundation QuartzCore UniformTypeIdentifiers)
   find_library(${FRAMEWORK}_LIBRARY ${FRAMEWORK} REQUIRED)
   target_link_libraries(iOSRemoteBridge PRIVATE ${${FRAMEWORK}_LIBRARY})
 endforeach()

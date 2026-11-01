@@ -12,7 +12,8 @@ void IRBPrepareSimulatorSmoke(void) {
 void IRBStartSimulatorSmoke(IRBControllerViewController *controller) {
     if(!smokeRequested()) return;
     NSData *data=[NSData dataWithContentsOfURL:smokeFile(@"irb-smoke-profile.json")];IRBProfile *profile=data?[IRBProfile fromData:data error:NULL]:nil;
-    NSDictionary *options=[NSJSONSerialization JSONObjectWithData:[NSData dataWithContentsOfURL:smokeFile(@"irb-smoke-options.json")] options:0 error:NULL];
+    NSData *optionsData=[NSData dataWithContentsOfURL:smokeFile(@"irb-smoke-options.json")];
+    NSDictionary *options=optionsData?[NSJSONSerialization JSONObjectWithData:optionsData options:0 error:NULL]:@{};
     BOOL pinFailure=[options[@"pin_failure"] boolValue];
     NSMutableDictionary *result=[@{@"passed":@NO,@"decoded_frames":@0,@"responses":@0,@"pin_failure":@(pinFailure)} mutableCopy];
     __block BOOL finished=NO,sent=NO;
@@ -49,6 +50,9 @@ void IRBStartSimulatorSmoke(IRBControllerViewController *controller) {
         }
     };
     if(!profile) {finish(NO,@"test profile missing");return;}
+    IRBProfile *stored=IRBProfileStore.load;
+    result[@"keychain_valid"]=@([stored.JSONData isEqualToData:profile.JSONData]);
+    if(![result[@"keychain_valid"] boolValue]) {finish(NO,@"pairing Keychain round trip failed");return;}
     [controller.session connect:profile fps:60 control:YES];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,35*NSEC_PER_SEC),dispatch_get_main_queue(),^{finish(NO,@"simulator integration timed out");});
 }
