@@ -8,7 +8,8 @@ static NSError *keychainError;
 void IRBPrepareSimulatorSmoke(void) {
     if(!smokeRequested()) return;
     NSData *data=[NSData dataWithContentsOfURL:smokeFile(@"irb-smoke-profile.json")];
-    IRBProfile *profile=data?[IRBProfile fromData:data error:NULL]:nil;if(profile) [IRBProfileStore save:profile error:&keychainError];
+    IRBProfile *profile=data?[IRBProfile fromData:data error:NULL]:nil;
+    NSError *error=nil;if(profile) [IRBProfileStore save:profile error:&error];keychainError=error;
 }
 void IRBStartSimulatorSmoke(IRBControllerViewController *controller) {
     if(!smokeRequested()) return;
