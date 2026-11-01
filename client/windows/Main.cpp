@@ -4,6 +4,7 @@
 #include <commdlg.h>
 #include <shellapi.h>
 #include <fstream>
+#include <filesystem>
 #include <memory>
 #include <sstream>
 #include <algorithm>
@@ -70,7 +71,7 @@ void disconnect() {
 void connectClient() {
     disconnect();
     try {
-        std::ifstream stream(editText(configEdit));
+        std::ifstream stream{std::filesystem::path(editText(configEdit))};
         if(!stream) throw std::runtime_error("Select the local client-config.json pairing file");
         json config; stream>>config;
         bool wantsControl=SendMessageW(controlCheck,BM_GETCHECK,0,0)==BST_CHECKED;
@@ -153,6 +154,10 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         if(w==VK_F5) { configure(currentFPS,1); return 0; }
         if(w==VK_RETURN&&GetFocus()==bitrateEdit) { command({{"op","configure"},{"bitrate",GetDlgItemInt(hwnd,Bitrate,nullptr,FALSE)*1000}}); return 0; }
         if((GetKeyState(VK_CONTROL)&0x8000)&&w=='T') { SetFocus(textEdit); return 0; }
+        if(w>=VK_LEFT&&w<=VK_DOWN) {
+            static const int usages[]={0x50,0x52,0x4f,0x51};
+            command({{"op","key"},{"usage",usages[w-VK_LEFT]}}); return 0;
+        }
         break;
     case WM_LBUTTONDOWN: {
         double x,y; SetFocus(hwnd);
@@ -201,6 +206,11 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int show) {
                            CW_USEDEFAULT,CW_USEDEFAULT,1100,950,nullptr,nullptr,instance,nullptr);
     if(!hwnd) { WSACleanup(); return 1; }
     int argc=0; auto argv=CommandLineToArgvW(GetCommandLineW(),&argc);
+    if(argv&&argc>1&&std::wstring(argv[1])==L"--self-test-ui") {
+        bool controls=GetDlgItem(hwnd,Config)&&GetDlgItem(hwnd,Connect)&&GetDlgItem(hwnd,Disconnect)&&
+                      GetDlgItem(hwnd,SendText)&&GetDlgItemInt(hwnd,Bitrate,nullptr,FALSE)==8000;
+        LocalFree(argv); DestroyWindow(hwnd); WSACleanup(); return controls?0:1;
+    }
     if(argv&&argc>1) SetWindowTextW(configEdit,argv[1]); if(argv) LocalFree(argv);
     ShowWindow(hwnd,show); MSG message;
     while(GetMessageW(&message,nullptr,0,0)>0) {

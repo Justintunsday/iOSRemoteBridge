@@ -19,6 +19,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Restore dependency cache
+        id: vcpkg_cache
         uses: actions/cache@v4
         with:
           path: .vcpkg-cache
@@ -46,6 +47,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ctest --test-dir build -C Release --output-on-failure 2>&1 | Tee-Object build-logs/tests.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $ui = Start-Process -FilePath "$pwd/build/client/windows/Release/iOSRemoteBridge.exe" -ArgumentList '--self-test-ui' -WindowStyle Hidden -Wait -PassThru
+          if ($ui.ExitCode -ne 0) { throw 'Win32 GUI startup failed' }
       - name: Generate encoded fixture and verify decoder
         shell: pwsh
         run: |
@@ -65,8 +68,16 @@ jobs:
           Copy-Item build/client/windows/Release/iOSRemoteBridge.exe dist/windows/
           Copy-Item build/client/windows/Release/*.dll dist/windows/
           Copy-Item LICENSE,THIRD_PARTY_NOTICES.md dist/windows/licenses/
-          Copy-Item build/vcpkg_installed/x64-windows/share/ffmpeg,build/vcpkg_installed/x64-windows/share/openssl,build/vcpkg_installed/x64-windows/share/nlohmann_json dist/windows/licenses/ -Recurse
-          Copy-Item .vcpkg/buildtrees/ffmpeg/src/* dist/sources/ -Recurse
+          Copy-Item licenses/* dist/windows/licenses/
+          Copy-Item build/vcpkg_installed/x64-windows/share/ffmpeg,build/vcpkg_installed/x64-windows/share/openssl,build/vcpkg_installed/x64-windows/share/nlohmann-json dist/windows/licenses/ -Recurse
+          $meta = Get-Content -Raw .vcpkg/ports/ffmpeg/vcpkg.json | ConvertFrom-Json
+          $port = Get-Content -Raw .vcpkg/ports/ffmpeg/portfile.cmake
+          $expected = [regex]::Match($port, 'SHA512\s+([a-f0-9]{128})').Groups[1].Value
+          Invoke-WebRequest "https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n$($meta.version).tar.gz" -OutFile dist/sources/ffmpeg-original.tar.gz
+          $actual = (Get-FileHash dist/sources/ffmpeg-original.tar.gz -Algorithm SHA512).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw 'FFmpeg source archive hash mismatch' }
+          Copy-Item .vcpkg/ports/ffmpeg dist/sources/vcpkg-ffmpeg-port -Recurse
+          Copy-Item build-logs/decoder-test.log dist/sources/FFMPEG-BUILD.txt
           Copy-Item vcpkg.json dist/sources/
           Copy-Item docs/CLIENT.md dist/windows/README.md
       - uses: actions/upload-artifact@v4
@@ -87,3 +98,9 @@ jobs:
           path: |
             build-logs/
             .vcpkg/buildtrees/*/*.log
+      - name: Preserve compiled dependencies even when a later check fails
+        uses: actions/cache/save@v4
+        if: always() && steps.vcpkg_cache.outputs.cache-hit != 'true'
+        with:
+          path: .vcpkg-cache
+          key: windows-vcpkg-${{ hashFiles('vcpkg.json') }}

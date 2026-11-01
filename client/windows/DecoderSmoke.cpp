@@ -5,6 +5,9 @@
 int main(int argc,char **argv) {
     if(argc!=2) { std::cerr<<"usage: decoder-smoke fixture.h264\n"; return 2; }
     try {
+        std::string license=avcodec_license();
+        std::cout<<"FFmpeg license: "<<license<<"\nFFmpeg configuration: "<<avcodec_configuration()<<"\n";
+        if(license.find("LGPL version 2.1 or later")==std::string::npos) throw std::runtime_error("unexpected FFmpeg license configuration");
         std::ifstream input(argv[1],std::ios::binary);
         std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(input)),{});
         if(bytes.empty()) throw std::runtime_error("fixture missing");

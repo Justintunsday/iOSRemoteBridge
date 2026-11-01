@@ -1,13 +1,25 @@
 import base64
 import unittest
+import sys
+from pathlib import Path
 try:
-    from mcp import Client
+    from mcp import Client, StdioServerParameters
     from automation.mcp_server import DeviceAdapter, create_server
 except ImportError:
     Client = None
 
 @unittest.skipIf(Client is None, "optional MCP SDK not installed")
 class MCPTests(unittest.IsolatedAsyncioTestCase):
+    async def test_real_stdio_startup_without_device_or_credentials(self):
+        server = StdioServerParameters(command=sys.executable,
+            args=["-m", "automation.mcp_server", "--config", "nonexistent-pairing-file.json"],
+            cwd=Path(__file__).resolve().parents[2])
+        async with Client(server) as client:
+            tools = await client.list_tools()
+            self.assertIn("get_screen_frame", {tool.name for tool in tools.tools})
+            status = await client.call_tool("get_connection_status", {})
+            self.assertFalse(status.is_error)
+
     async def test_discovery_readonly_gate_and_validation(self):
         calls = []
         class Fake:

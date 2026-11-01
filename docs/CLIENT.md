@@ -18,7 +18,8 @@ The source artifact in the same run contains the corresponding FFmpeg sources.
 Keyboard shortcuts: F1 rotates clockwise; F2 requests 30 FPS; F3 requests 60;
 F4 requests half resolution; F5 requests native resolution; Ctrl+T focuses the
 text field; Esc disconnects. Enter in the kbps field changes the bitrate.
-Quality changes can return a busy error while a frame is outstanding; retry.
+Quality changes are applied at a frame boundary. A second simultaneous quality
+change can return a busy error; retry after the first completes.
 
 Statistics show decoded FPS, **network round-trip time**, last decode time and
 the selected decoder. RTT is not end-to-end display latency. D3D11VA is attempted

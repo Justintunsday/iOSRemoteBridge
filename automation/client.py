@@ -4,6 +4,7 @@ import hmac
 import json
 import queue
 import re
+import select
 import socket
 import ssl
 import threading
@@ -32,6 +33,7 @@ class BridgeClient:
         self.sock = None
         self._sequence = self._rx = self._request = 0
         self._send_lock = threading.Lock()
+        self._outgoing = queue.Queue(maxsize=128)
         self._pending_lock = threading.Lock()
         self._pending = {}
         self._events = queue.Queue(maxsize=8)
@@ -56,12 +58,10 @@ class BridgeClient:
             pin = hashlib.sha256(self.sock.getpeercert(binary_form=True)).hexdigest()
             if not hmac.compare_digest(pin, self.config["certificate_sha256"].lower()):
                 raise BridgeError("server certificate pin mismatch; no credentials sent")
-            self.sock.settimeout(self.timeout + 10)
+            self.sock.setblocking(False)
             self._send(wire.AUTH, {"token": self.config["token"], "control": self.control, "fps": self.fps})
             self._reader = threading.Thread(target=self._read, daemon=True)
             self._reader.start()
-            self._heartbeat = threading.Thread(target=self._ping, daemon=True)
-            self._heartbeat.start()
             deadline = time.monotonic() + self.timeout
             while True:
                 remaining = deadline - time.monotonic()
@@ -84,14 +84,8 @@ class BridgeClient:
             if not self.sock or self._stop.is_set(): raise BridgeError("not connected")
             self._sequence += 1
             header = wire.Header(kind, 0, len(payload), self._sequence, pts).pack()
-            self.sock.sendall(header + payload)
-
-    def _ping(self):
-        while not self._stop.wait(2):
-            try: self._send(wire.PING, pts=time.monotonic_ns() // 1000)
-            except (OSError, ValueError, BridgeError) as exc:
-                self._failed(BridgeError(str(exc)))
-                return
+            try: self._outgoing.put_nowait(header + payload)
+            except queue.Full as exc: raise BridgeError("outgoing queue full") from exc
 
     def _failed(self, error):
         self.error = error
@@ -105,30 +99,56 @@ class BridgeClient:
 
     def _read(self):
         sock = self.sock
+        received = bytearray()
+        pending = None
+        offset = 0
+        last_receive = last_ping = time.monotonic()
         try:
             while not self._stop.is_set():
-                header = wire.unpack(wire.recv_exact(sock, wire.HEADER.size))
-                if header.sequence != self._rx + 1: raise BridgeError("server sequence mismatch")
-                self._rx += 1
-                if header.kind not in (wire.VIDEO, wire.RESPONSE, wire.PONG):
-                    raise BridgeError("unexpected server frame type")
-                payload = wire.recv_exact(sock, header.length)
-                if header.kind == wire.VIDEO:
-                    self.last_video, self.last_frame_pts = payload, header.pts_us
-                    # Automation consumes rather than decodes video. JPEG snapshots
-                    # are an explicit RPC; acknowledging video prevents idle stalls.
-                    self._send(wire.CREDIT, pts=header.pts_us)
-                elif header.kind == wire.PONG:
-                    self.rtt_ms = (time.monotonic_ns() // 1000 - header.pts_us) / 1000
-                else:
-                    obj = json.loads(payload)
-                    if not isinstance(obj, dict): raise BridgeError("invalid server JSON")
-                    if "id" in obj:
-                        with self._pending_lock:
-                            pending = self._pending.get(obj["id"])
-                            if pending: pending.put_nowait(obj)
+                now = time.monotonic()
+                if now - last_receive > self.timeout + 10: raise BridgeError("TLS peer timed out")
+                if now - last_ping > 2:
+                    self._send(wire.PING, pts=time.monotonic_ns() // 1000)
+                    last_ping = now
+                if pending is None:
+                    try: pending = self._outgoing.get_nowait(); offset = 0
+                    except queue.Empty: pass
+                if pending is not None:
+                    try:
+                        sent = sock.send(memoryview(pending)[offset:])
+                        if not sent: raise EOFError("TLS connection closed")
+                        offset += sent
+                        if offset == len(pending): pending = None
+                    except (ssl.SSLWantReadError, ssl.SSLWantWriteError): pass
+                readable = sock.pending() or select.select([sock], [], [], .01)[0]
+                if readable:
+                    try:
+                        block = sock.recv(65536)
+                        if not block: raise EOFError("TLS connection closed")
+                        received.extend(block); last_receive = time.monotonic()
+                    except (ssl.SSLWantReadError, ssl.SSLWantWriteError): pass
+                while len(received) >= wire.HEADER.size:
+                    header = wire.unpack(received[:wire.HEADER.size])
+                    if header.kind not in (wire.VIDEO, wire.RESPONSE, wire.PONG):
+                        raise BridgeError("unexpected server frame type")
+                    total = wire.HEADER.size + header.length
+                    if len(received) < total: break
+                    if header.sequence != self._rx + 1: raise BridgeError("server sequence mismatch")
+                    self._rx += 1
+                    payload = bytes(received[wire.HEADER.size:total]); del received[:total]
+                    if header.kind == wire.VIDEO:
+                        self.last_video, self.last_frame_pts = payload, header.pts_us
+                        self._send(wire.CREDIT, pts=header.pts_us)
+                    elif header.kind == wire.PONG:
+                        self.rtt_ms = (time.monotonic_ns() // 1000 - header.pts_us) / 1000
                     else:
-                        self._events.put_nowait(obj)
+                        obj = json.loads(payload)
+                        if not isinstance(obj, dict): raise BridgeError("invalid server JSON")
+                        if "id" in obj:
+                            with self._pending_lock:
+                                response_queue = self._pending.get(obj["id"])
+                                if response_queue: response_queue.put_nowait(obj)
+                        else: self._events.put_nowait(obj)
         except (EOFError, OSError, ValueError, KeyError, TypeError, queue.Full, BridgeError) as exc:
             self._failed(BridgeError(str(exc)))
 
@@ -151,7 +171,7 @@ class BridgeClient:
             with self._pending_lock: self._pending.pop(ident, None)
 
     def close(self):
-        self._stop.set()
+        self._failed(BridgeError("connection closed"))
         if self.sock:
             try: self.sock.shutdown(socket.SHUT_RDWR)
             except OSError: pass

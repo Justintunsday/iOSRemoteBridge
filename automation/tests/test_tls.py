@@ -5,6 +5,7 @@ import socket
 import ssl
 import tempfile
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import unittest
 from pathlib import Path
 from automation import BridgeClient, BridgeError
@@ -29,7 +30,8 @@ class TLSTests(unittest.TestCase):
         context.load_cert_chain(self.folder / "server.crt", self.folder / "server.key")
         config = json.loads((self.folder / "client-config.json").read_text())
         config["port"] = listener.getsockname()[1]
-        observed = {"auth": False, "error": None, "credit": threading.Event()}
+        observed = {"auth": False, "error": None, "credit": threading.Event(),
+                    "ping": threading.Event(), "deferred": threading.Event()}
         def handle():
             try:
                 raw, _ = listener.accept()
@@ -51,9 +53,11 @@ class TLSTests(unittest.TestCase):
                         h = p.unpack(p.recv_exact(sock, 24)); data = p.recv_exact(sock, h.length)
                         if h.kind == p.CREDIT and h.pts_us == 12345: observed["credit"].set()
                         elif h.kind == p.PING:
+                            observed["ping"].set()
                             seq += 1; send(p.PONG, seq, data, h.pts_us)
                         elif h.kind == p.CONTROL:
                             request = json.loads(data)
+                            if request["op"] == "defer": observed["deferred"].set(); continue
                             seq += 1
                             if request["op"] == "bad_sequence":
                                 send(p.RESPONSE, seq+1, {"id": request["id"], "ok": True, "result": {}})
@@ -88,5 +92,21 @@ class TLSTests(unittest.TestCase):
 
     def test_missing_pin_is_rejected_before_network(self):
         with self.assertRaises(ValueError): BridgeClient({"host": "127.0.0.1", "token": "1"*64})
+
+    def test_concurrent_rpcs_and_heartbeat_share_one_tls_io_thread(self):
+        config, observed = self.server()
+        with BridgeClient(config, timeout=5) as client, ThreadPoolExecutor(max_workers=4) as workers:
+            results = list(workers.map(lambda _: client.request("get_device_info"), range(100)))
+            self.assertTrue(all(result == {"echo": "get_device_info"} for result in results))
+            self.assertTrue(observed["credit"].wait(2))
+            self.assertTrue(observed["ping"].wait(3))
+
+    def test_close_cancels_a_pending_operation_without_replay(self):
+        config, observed = self.server()
+        with BridgeClient(config, timeout=5) as client, ThreadPoolExecutor(max_workers=1) as workers:
+            pending = workers.submit(client.request, "defer")
+            self.assertTrue(observed["deferred"].wait(2))
+            client.close()
+            with self.assertRaisesRegex(BridgeError, "connection closed"): pending.result(timeout=2)
 
 if __name__ == "__main__": unittest.main()

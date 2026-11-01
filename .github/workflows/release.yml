@@ -1,0 +1,70 @@
+name: release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Semver without v; creates a DRAFT experimental release only'
+        required: true
+        type: string
+      ios_run:
+        description: 'Successful build-ios run for this exact main commit'
+        required: true
+        type: string
+      client_run:
+        description: 'Successful build-client run for this exact main commit'
+        required: true
+        type: string
+permissions:
+  contents: write
+  actions: read
+jobs:
+  draft:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION_INPUT: ${{ inputs.version }}
+      IOS_RUN: ${{ inputs.ios_run }}
+      CLIENT_RUN: ${{ inputs.client_run }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require successful real builds of the exact commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$VERSION_INPUT" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]
+          [[ "$IOS_RUN" =~ ^[0-9]+$ && "$CLIENT_RUN" =~ ^[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$IOS_RUN" > ios-run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CLIENT_RUN" > client-run.json
+          jq -e --arg sha "$GITHUB_SHA" '.head_sha == $sha and .head_branch == "main" and .conclusion == "success" and .path == ".github/workflows/build-ios.yml"' ios-run.json
+          jq -e --arg sha "$GITHUB_SHA" '.head_sha == $sha and .head_branch == "main" and .conclusion == "success" and .path == ".github/workflows/build-client.yml"' client-run.json
+      - name: Collect existing artifacts and corresponding source
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run download "$IOS_RUN" -n ios-rootless-deb -D release/ios
+          gh run download "$CLIENT_RUN" -n windows-client-x64 -D release/windows
+          gh run download "$CLIENT_RUN" -n windows-ffmpeg-corresponding-source -D release/source
+          test -f release/windows/iOSRemoteBridge.exe
+          find release/ios -name '*.deb' | grep -q .
+          test -f release/source/FFMPEG-BUILD.txt
+          (cd release/windows && zip -q -r ../windows-client-x64.zip .)
+          (cd release/source && zip -q -r ../windows-ffmpeg-source.zip .)
+          cp release/ios/*.deb release/
+          (cd release && sha256sum ./*.deb ./*.zip > SHA256SUMS)
+      - name: Create reviewable draft, never an automatic public release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<EOF
+          Experimental supervised prototype, compiled from $GITHUB_SHA.
+
+          iOS build: https://github.com/$GITHUB_REPOSITORY/actions/runs/$IOS_RUN
+          Windows build: https://github.com/$GITHUB_REPOSITORY/actions/runs/$CLIENT_RUN
+
+          Physical iOS 16.1.1 compatibility and performance remain unverified
+          unless a device-validation report for this commit is supplied.
+          See docs/DEVICE_TESTING.md before installation. This software uses
+          FFmpeg under LGPL-2.1-or-later; corresponding source is attached.
+          EOF
+          gh release create "v$VERSION_INPUT" --target "$GITHUB_SHA" --draft --prerelease --title "iOSRemoteBridge $VERSION_INPUT (experimental)" --notes-file release-notes.md release/*.deb release/*.zip release/SHA256SUMS
