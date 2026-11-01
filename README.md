@@ -28,7 +28,7 @@ The owner confirmed corrected colors and smoother motion; see the report's limit
   presses, Home/App Switcher, volume and experimental app launch.
 - Native Win32 receiver with D3D11VA selection/software fallback, mouse/text
   control, rotation, aspect fitting, adjustable sharpening, quality controls,
-  reconnect and FPS/RTT/decode statistics.
+  collapsible toolbar, reconnect and FPS/RTT/decode statistics.
 - Python API/CLI, JSON-lines adapter and optional standard MCP stdio tools.
 - GitHub Actions builds, TLS/H.264 simulator tests, validation, logs/artifacts
   and a manually gated draft-release workflow.

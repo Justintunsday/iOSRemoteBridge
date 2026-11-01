@@ -44,6 +44,12 @@ monitor's work area, with room for the toolbar and window borders. On a small
 display the minimum toolbar width can require a little letterboxing. The
 toolbar reflows into compact rows so controls stay visible in portrait mode.
 
+Hide tools (F9) hides the entire toolbar, including the pairing and quality
+controls, so the video uses the full client area. F9 restores it. You can also
+right-click the video or the window title bar and choose Show toolbar. Toggling
+does not reconnect or reset control values. Keep ratio/Fit account for the
+current toolbar height, and mouse coordinates follow the displayed image.
+
 The Sharp slider adjusts local edge sharpening from 0–100%, starting at 40%.
 Zero disables it. The filter runs after resizing, uses a small luma unsharp mask
 and limits halos. Flat colors and channel differences are preserved; the control
