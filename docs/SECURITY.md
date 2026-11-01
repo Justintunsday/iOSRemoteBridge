@@ -20,8 +20,8 @@ physical approval on the unlocked iPhone. It is not an unattended-access server.
 - The network process runs as mobile. The SpringBoard library inherits
   SpringBoard's process privileges. Signing a dylib with extra entitlements
   would not grant those entitlements to its host. The only daemon entitlement
-  requested here is platform-application; its exact necessity and Keychain
-  import behavior still need target-device verification. No protected-content,
+  requested here is platform-application. PKCS12 import succeeded on the target;
+  the entitlement's exact necessity has not been isolated. No protected-content,
   task-port or kernel-modification entitlements are added.
 - Network clients cannot reach the private Unix socket directly. Its mode is
   0600 inside the 0700 directory, and the daemon checks the peer's UID. This is
@@ -50,7 +50,7 @@ physical approval on the unlocked iPhone. It is not an unattended-access server.
 The listener is Wi-Fi constrained. It has no UPnP, port forwarding or automatic
 internet exposure. If remote internet use is needed, first validate the system
 on-device and use a separately managed authenticated VPN. The current IPv4
-listener/interface binding has not been physically verified. Do not treat the
+listener worked over Wi-Fi in the dated device test. Do not treat the
 prototype as security-audited or ready for a public endpoint.
 
 Automated checks include fragmented TLS records, wrong certificate pins,

@@ -1,7 +1,8 @@
 # First installation and physical verification
 
-No device has been tested by this project yet. Use the owner's iPhone SE 2
-(iPhone12,8) on iOS 16.1.1 with an active Dopamine rootless jailbreak and ElleKit.
+Initial physical results are recorded in [the 2026-11-01 report](DEVICE_VALIDATION_2026-11-01.md).
+Capture/playback passed; the initial input test failed. For further validation,
+use the owner's iPhone SE 2 (iPhone12,8) on iOS 16.1.1 with Dopamine and ElleKit.
 Keep working SSH access available for recovery. A reboot requires jailbreak
 reactivation; the service is not available in the stock pre-jailbreak state.
 
@@ -55,8 +56,9 @@ to 1334x750 for landscape. Show a numbered grid to check every edge and pixel
 scale, then switch Home Screen, Settings and another app repeatedly. Compare a
 saved JPEG to the live device. A non-null surface or a 60-Hz timer is insufficient.
 
-If CARenderServer returns an error, black output or wrong geometry, record the
-exact OS build, error, dimensions and SpringBoard logs. This backend's behavior
+If CARenderServer produces blank output or wrong geometry, record the
+exact OS build, dimensions and SpringBoard logs. Its void return is not an error
+code; inspect actual pixels. This backend's behavior
 on the target is a validation gate. No screenshot fallback or other private API
 should be silently substituted. A ReplayKit Broadcast Upload Extension is a
 possible separate future backend, requiring an owner-started broadcast.
@@ -68,7 +70,7 @@ harmless test screen. Check tap, two taps, long press, a timed swipe, all corner
 Home and App Switcher. Rotate the viewer through all four rotations and verify
 letterbox clicks are ignored. Test contacts 0 and 1 independently through the
 touch API, then together. Verify a network disconnect releases both contacts.
-HID delivery, sender discovery, volume and the double-Home App Switcher method
+HID delivery, sender discovery, volume and SpringBoard navigation handlers
 are experimental until these checks pass on iOS 16.1.1.
 
 For ASCII text, focus a test field and send an entire sentence with mixed case,
@@ -117,4 +119,4 @@ Never publish those files or include them in diagnostic archives.
 
 Record results in a dated device-validation report: model, exact OS build,
 jailbreak/ElleKit versions, package commit, each test outcome and log evidence.
-Until that report exists, compatibility and performance remain unverified.
+Do not generalize a passing test to features or commits absent from that report.

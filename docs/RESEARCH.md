@@ -27,7 +27,8 @@ can operate asynchronously. Its screenshot fallback adds image drawing and
 allocation; blue-channel sampling can miss a change, and black pixels are not
 proof of capture failure. iOSRemoteBridge uses a bounded buffer pool, holds no
 mutable shared capture frame across encoder work, and does not fall back on
-black or protected output. Capture still needs exact-device visual verification.
+black or protected output. Native Home Screen pixels have now been visually
+verified; see the dated device report for the limited test scope.
 
 The [encoder](https://github.com/e1abrador/ScreenMirror/blob/d8b801e9805e9946a96af57c8a99d65831d76854/ios/src/VideoEncoder.m)
 already uses VideoToolbox, disables reordering and converts AVCC NAL units to
@@ -172,5 +173,25 @@ despite a functioning encoder/transport. Independent primary implementations
 [ioscpy](https://github.com/lautarovculic/ioscpy/blob/main/device/tweak/Capture.mm))
 use a display name and declare a void return. The prototype now resolves
 CADisplay.mainDisplay.name with an LCD fallback and does not interpret a return
-register as a status code. This correction must be visually revalidated on the
-phone; frame counts alone were insufficient to establish valid screen pixels.
+register as a status code. This correction produced recognizable Home Screen
+pixels on the phone and live Windows playback confirmed by its owner; see
+[the device report](DEVICE_VALIDATION_2026-11-01.md). Frame counts alone were
+insufficient to establish valid screen pixels.
+
+## Device-driven input and service corrections
+
+The first supervised Windows input test failed despite working video. The HID
+path now restores the hand's event mask/range/touch fields after attaching child
+events and uses identity transitions. Separate observation and dispatch clients
+avoid using the monitored client for both roles. A keyboard is not assigned the
+touch-panel sender. These event-shape facts were corroborated against
+[WebKit's HID generator](https://github.com/WebKit/WebKit/blob/main/Tools/WebKitTestRunner/ios/HIDEventGenerator.mm)
+and [ioscpy's injector](https://github.com/lautarovculic/ioscpy/blob/main/device/tweak/InputInjector.mm);
+the latter is an API reference, not incorporated GPL source. Home and App Switcher
+use dynamically guarded SpringBoard handlers instead of assuming consumer HID
+events are delivered. Runtime submission diagnostics do not prove UI effects.
+
+The listener was later absent with launchctl reporting an idle-exit jetsam.
+The package now requests unconditional KeepAlive rather than restart only on
+unsuccessful exit. This follows [Apple's launchd service guidance](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html).
+Memory-pressure recovery and idle power still require device observation.

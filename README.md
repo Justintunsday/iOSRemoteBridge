@@ -7,10 +7,12 @@ hardware-accelerated video streaming and system-wide input control.
 [![Windows client](https://github.com/Justintunsday/iOSRemoteBridge/actions/workflows/build-client.yml/badge.svg?branch=main)](https://github.com/Justintunsday/iOSRemoteBridge/actions/workflows/build-client.yml)
 [![Tests](https://github.com/Justintunsday/iOSRemoteBridge/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/Justintunsday/iOSRemoteBridge/actions/workflows/tests.yml)
 
-**Experimental supervised prototype. Physical compatibility with iPhone SE 2,
-iOS 16.1.1, Dopamine and ElleKit is not verified yet. No target-device FPS,
-latency, thermal or battery result is claimed.** A successful build does not
-prove that private capture or HID APIs work on that device.
+**Experimental supervised prototype. Native-resolution capture and live Windows
+playback have been verified on an iPhone SE 2, iOS 16.1.1, Dopamine and ElleKit.
+Remote input failed the initial physical test and is being corrected.** See the
+[dated device report](docs/DEVICE_VALIDATION_2026-11-01.md) for exact commits,
+short measurements and remaining gates. Sustained 60 FPS, hardware encoder use,
+glass-to-glass latency and long-term power/stability are not verified.
 
 ## Implemented
 
@@ -27,7 +29,7 @@ prove that private capture or HID APIs work on that device.
 - GitHub Actions builds, TLS/H.264 simulator tests, validation, logs/artifacts
   and a manually gated draft-release workflow.
 
-These UI/private-API paths still need on-device verification. There is one
+Input and the remaining private-API paths need further device testing. There is one
 approved session at a time. The transport is TLS/TCP with frame credit, not
 Sunshine/Moonlight protocol compatibility. HEVC, audio, WebRTC, automatic app
 orientation, arbitrary Unicode, UI hierarchy and a native macOS GUI remain

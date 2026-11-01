@@ -1,13 +1,16 @@
 # Performance evidence and measurement
 
-**No target-device performance measurements have been taken.** CI validates
-compilation, protocol behavior and a tiny synthetic H.264 decoder fixture.
-Those tests cannot establish capture FPS, hardware encoder use, Wi-Fi latency,
-input delivery, thermal stability or battery consumption on an A13.
+**Short physical samples are available in the [2026-11-01 device report](DEVICE_VALIDATION_2026-11-01.md).**
+One native 30-FPS Python session averaged 28.26 encoded FPS over approximately
+13.7 seconds. A live Windows title sample reported 19.9 decoded FPS with D3D11VA.
+These are separate paths and short observations, not sustained benchmarks.
+CI separately validates compilation, protocol behavior and synthetic H.264 decode.
+Hardware encoder use, glass-to-glass latency, input latency, sustained thermal
+stability and battery consumption remain unmeasured.
 
 Targets: native 750x1334 portrait / 1334x750 landscape, 30 FPS power-saving mode,
 60 FPS interactive mode, H.264 hardware encoding and ideally <80 ms local
-glass-to-glass latency. None is a measured performance claim. Native resolution
+glass-to-glass latency. These remain objectives. Native resolution
 means the pixel dimensions must be inspected on the device, not inferred from
 an encoder configuration or a successful build.
 

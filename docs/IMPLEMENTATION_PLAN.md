@@ -1,9 +1,10 @@
 # Implementation ledger
 
-Target: iPhone12,8 / iOS 16.1.1 / Dopamine rootless / ElleKit. No physical
-device is attached to this development environment. Compile evidence and
-runtime evidence are tracked separately. No release is implied by a version
-string or a successful CI build.
+Target: iPhone12,8 / iOS 16.1.1 / Dopamine rootless / ElleKit. A supervised
+physical test verified capture and Windows playback; the first input test
+failed. Compile and runtime evidence are tracked separately in the
+[dated device report](DEVICE_VALIDATION_2026-11-01.md). No release is implied
+by a version string or a successful CI build.
 
 1. `feature/build-foundation`: private repository, reproducible CI, shared wire
    format and adversarial parser/coordinate tests.
@@ -25,13 +26,13 @@ be deferred when the first implementation cannot validate them reliably.
 
 | Phase | Source/build progress | Physical evidence |
 | --- | --- | --- |
-| Research/repository | Private repo, pinned analysis, notices, feature branches and CI | Exact target not inspected |
-| Capture | IOSurface pool, CARenderServer producer and GPU scaling; .deb compiles | Pixels, cross-app capture and rotation unverified |
-| Video | VideoToolbox H.264, IDRs, bounded queues, adaptation and recovery | Hardware use, FPS, latency, power and heat unmeasured |
-| Input | HID contact state, gestures, paced ASCII, keys/buttons and launch | Delivery remains experimental |
-| Windows | Native receiver, decoding, input, metrics and CI harness | Check actual native CI; phone pairing not tested |
-| Automation | Python, JSON-lines and MCP; simulator/security tests pass | No physical agent-to-iPhone session |
-| Reliability | Consent/lock checks, cancellation, thermal pacing and launchd recovery | Soak/reboot/respring tests pending |
+| Research/repository | Private repo, pinned analysis, notices, feature branches and CI | Exact phone/OS inspected |
+| Capture | IOSurface pool, CARenderServer producer and GPU scaling; .deb compiles | Real 750x1334 Home Screen pixels verified; cross-app/rotation pending |
+| Video | VideoToolbox H.264, IDRs, bounded queues, adaptation and recovery | Short 30-FPS sample recorded; hardware use, sustained 60 FPS and display latency unverified |
+| Input | HID contacts/gestures/text and guarded SpringBoard navigation | Initial delivery test failed; correction under retest |
+| Windows | Native receiver, decoding, input, metrics and passing CI harness | Owner confirmed live screen; D3D11VA title observed |
+| Automation | Python, JSON-lines and MCP; simulator/security tests pass | Python info, video and JPEG received from physical phone; MCP host path pending |
+| Reliability | Consent/lock checks, cancellation, thermal pacing and launchd recovery | Prompt/reload tested; idle-exit found and corrected; soak/reboot gates pending |
 
 No release/tag is published by this ledger. The manual release workflow creates
 only a draft from successful real artifacts for the same main commit. Publish
