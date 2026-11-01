@@ -9,7 +9,8 @@ hardware-accelerated video streaming and system-wide input control.
 
 **Experimental supervised prototype. Native-resolution capture and live Windows
 playback have been verified on an iPhone SE 2, iOS 16.1.1, Dopamine and ElleKit.
-Remote input failed the initial physical test and is being corrected.** See the
+Home, App Switcher, tap and swipe passed a supervised retest after fixing the
+initial input failure.** See the
 [dated device report](docs/DEVICE_VALIDATION_2026-11-01.md) for exact commits,
 short measurements and remaining gates. Sustained 60 FPS, hardware encoder use,
 glass-to-glass latency and long-term power/stability are not verified.
@@ -29,7 +30,7 @@ glass-to-glass latency and long-term power/stability are not verified.
 - GitHub Actions builds, TLS/H.264 simulator tests, validation, logs/artifacts
   and a manually gated draft-release workflow.
 
-Input and the remaining private-API paths need further device testing. There is one
+Other input modes and private-API paths need further device testing. There is one
 approved session at a time. The transport is TLS/TCP with frame credit, not
 Sunshine/Moonlight protocol compatibility. HEVC, audio, WebRTC, automatic app
 orientation, arbitrary Unicode, UI hierarchy and a native macOS GUI remain

@@ -1,8 +1,9 @@
 # Implementation ledger
 
 Target: iPhone12,8 / iOS 16.1.1 / Dopamine rootless / ElleKit. A supervised
-physical test verified capture and Windows playback; the first input test
-failed. Compile and runtime evidence are tracked separately in the
+physical test verified capture and Windows playback. A correction after the
+first failed input test passed navigation/tap/swipe retests. Compile and runtime
+evidence are tracked separately in the
 [dated device report](DEVICE_VALIDATION_2026-11-01.md). No release is implied
 by a version string or a successful CI build.
 
@@ -28,8 +29,8 @@ be deferred when the first implementation cannot validate them reliably.
 | --- | --- | --- |
 | Research/repository | Private repo, pinned analysis, notices, feature branches and CI | Exact phone/OS inspected |
 | Capture | IOSurface pool, CARenderServer producer and GPU scaling; .deb compiles | Real 750x1334 Home Screen pixels verified; cross-app/rotation pending |
-| Video | VideoToolbox H.264, IDRs, bounded queues, adaptation and recovery | Short 30-FPS sample recorded; hardware use, sustained 60 FPS and display latency unverified |
-| Input | HID contacts/gestures/text and guarded SpringBoard navigation | Initial delivery test failed; correction under retest |
+| Video | VideoToolbox H.264, IDRs, bounded queues, adaptation and recovery | Short 30/60-request samples recorded; native 60 FPS not achieved; hardware use/display latency unverified |
+| Input | HID contacts/gestures/text and guarded SpringBoard navigation | Home, App Switcher, tap and swipe passed API retest; other modes pending |
 | Windows | Native receiver, decoding, input, metrics and passing CI harness | Owner confirmed live screen; D3D11VA title observed |
 | Automation | Python, JSON-lines and MCP; simulator/security tests pass | Python info, video and JPEG received from physical phone; MCP host path pending |
 | Reliability | Consent/lock checks, cancellation, thermal pacing and launchd recovery | Prompt/reload tested; idle-exit found and corrected; soak/reboot gates pending |

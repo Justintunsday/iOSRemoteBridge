@@ -46,7 +46,7 @@ on this iOS version; hardware encoding has **not** been conclusively verified.
 RTT and capture-to-ack exclude monitor scanout and are **not glass-to-glass
 latency**. No sub-80-ms display-latency claim is made.
 
-## Follow-up corrections awaiting device retest
+## Follow-up corrections and retest
 
 - `fa43d37`: ignore the bridge STOP acknowledgement after the daemon has already
   disconnected, preserving the two-second normal reconnect delay. Local STOP
@@ -56,18 +56,63 @@ latency**. No sub-80-ms display-latency claim is made.
   the prior SuccessfulExit condition did not keep the listener available.
   Restarting the daemon restored the connection. The new policy still needs
   idle/recovery observation; it does not exempt the service from memory pressure.
+  After the update, the same daemon PID remained running through the next idle,
+  lock and approved input sessions; launchctl reported one run and KeepAlive.
 - `0049e94`: separate HID observation from dispatch, restore aggregate hand fields
   after adding fingers, include contact identity transitions, avoid assigning
   the touch-panel sender to keyboard events, and dynamically use SpringBoard's
   Home/App Switcher handlers. Input diagnostics record readiness and submission
-  counts without coordinates, typed text or key values. Delivery remains pending.
+  counts without coordinates, typed text or key values.
+
+The `0049e942d05969f0bed5f5f6bb1aa1712c9d8bc1` package from
+[build 41286100021](https://github.com/Justintunsday/iOSRemoteBridge/actions/runs/41286100021)
+was installed and SpringBoard reloaded. Following fresh physical approval:
+
+- App Switcher opened and its captured screen showed app cards.
+- Home returned from App Switcher to the Home Screen.
+- A normalized tap on Clock opened Clock's timer screen; no timer was started.
+- A 400-ms horizontal swipe moved from the first Home Screen page to the second.
+- Captured Settings, Clock, Home Screen and App Switcher contents demonstrate
+  capture across those system views. Other apps and protected surfaces remain
+  outside the verified set.
+- Reconfiguration to half scale produced a recognizable 374x666 JPEG (even
+  encoder dimensions round down from 375x667). Native 750x1334 / 30-FPS mode
+  was restored before returning the connection to Windows.
+- Captured images confirmed the visible results, rather than treating the
+  submission replies as delivery proof. Images remain private and untracked.
+- An earlier retest ended when the phone locked; the daemon logged the lock
+  and closed TLS, confirming this shutdown path in that session.
+
+This retest exercises the Python control API and the same phone-side input
+path used by Windows. The Windows mouse/buttons still need an interactive
+retest of this package. Text, keyboard, multi-touch and volume are not implied
+to work by these observations.
+
+Two additional short native Python telemetry windows were collected on this
+package, on the same Wi-Fi with Low Power Mode off and nominal thermal state:
+
+| Requested FPS | Sample interval | Encoded FPS over interval | Last-capture sample range | Last-encode sample range | Capture-to-ack EWMA range |
+| --- | --- | --- | --- | --- | --- |
+| 30 | 7.376 s | 23.73 | 4.329–9.507 ms | 10.566–13.325 ms | 27.917–98.887 ms |
+| 60 | 8.186 s | 25.04 | 7.009–8.663 ms | 10.375–12.451 ms | 29.155–45.296 ms |
+
+Intervals use the difference in encoded-frame counters divided by the difference
+in session elapsed times (recovered from each counter and its reported mean).
+The zero-frame startup sample was excluded. These are periodic last-frame
+samples, not per-frame percentile distributions. SpringBoard resident memory
+ranged 169,426,944–174,030,848 bytes in the 30-FPS window and 169,132,032 bytes
+in the 60-FPS window; it includes the entire SpringBoard process and its other
+tweaks. Content and run durations were not controlled for a sustained benchmark.
+**The native 60-FPS target was not achieved.** One-frame credit serializes
+capture/encode/transfer/ack, and display-link ticks can be skipped while that
+cycle is outstanding. More throughput work and longer measurements are needed.
 
 ## Remaining validation
 
-Retest input and reconnect after installing the follow-up package. Check
+Retest Windows input and reconnect with the follow-up package. Check
 cross-app capture, all rotations and edges, multi-touch, long press, text,
-volume, app launch, STOP during input, lock, Wi-Fi loss, respring/reboot,
-60-FPS mode, half-resolution mode, protected content, memory growth and battery
+volume, app launch, STOP during input, Wi-Fi loss, respring/reboot recovery,
+sustained 30/60-FPS operation, protected content, memory growth and battery
 use. A standard MCP host has been tested against a TLS simulator; a physical
 MCP-host-to-phone session remains untested. Use DEVICE_TESTING.md for the exact
 procedures. A successful package build does not close these runtime gates.

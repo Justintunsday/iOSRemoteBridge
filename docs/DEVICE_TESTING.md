@@ -1,7 +1,8 @@
 # First installation and physical verification
 
 Initial physical results are recorded in [the 2026-11-01 report](DEVICE_VALIDATION_2026-11-01.md).
-Capture/playback passed; the initial input test failed. For further validation,
+Capture/playback passed; Home, App Switcher, tap and swipe passed after fixing
+the initial input failure. For further validation,
 use the owner's iPhone SE 2 (iPhone12,8) on iOS 16.1.1 with Dopamine and ElleKit.
 Keep working SSH access available for recovery. A reboot requires jailbreak
 reactivation; the service is not available in the stock pre-jailbreak state.

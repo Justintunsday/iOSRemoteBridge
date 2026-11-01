@@ -69,6 +69,12 @@ SpringBoard thread. The mouse controls one contact; API contacts 0..9 permit
 multi-touch. Coordinates are normalized in the natural portrait plane. The
 viewer applies inverse rotation and rejects letterbox clicks.
 
+Home and App Switcher use dynamically guarded SpringBoard handlers. Volume
+and keyboard remain HID operations. Separate HID clients observe the physical
+sender and submit synthetic events; aggregate hand fields are restored after
+attaching finger events. Input replies describe submission, with delivery
+established separately by inspecting the resulting screen.
+
 The native client uses Win32, OpenSSL and dynamically linked FFmpeg. D3D11VA is
 selected when offered; decode failure resets to software and requests an IDR.
 Pixels are copied back to BGRA and presented with GDI. This avoids a heavyweight

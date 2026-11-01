@@ -10,8 +10,9 @@
 
 The [2026-11-01 physical report](DEVICE_VALIDATION_2026-11-01.md) confirms daemon
 startup, pinned TLS, visible approval, real 750x1334 capture and live Windows
-D3D11VA playback on the target phone. The initial input test failed. Follow-up
-fixes require retesting; other gates in this document are not implied to pass.
+D3D11VA playback on the target phone. After correcting an initial input failure,
+Home, App Switcher, tap and swipe passed a supervised Python-API retest. Windows
+mouse/buttons and other gates in this document are not implied to pass.
 
 The A13 is arm64e-capable. A SpringBoard dylib needs the matching arm64e ABI;
 an arm64-only daemon does not eliminate that requirement. Use a macOS runner

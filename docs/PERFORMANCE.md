@@ -4,6 +4,9 @@
 One native 30-FPS Python session averaged 28.26 encoded FPS over approximately
 13.7 seconds. A live Windows title sample reported 19.9 decoded FPS with D3D11VA.
 These are separate paths and short observations, not sustained benchmarks.
+Later matched-path Python samples on the input-fix package reached 23.73 encoded
+FPS at 30 requested and 25.04 at 60 requested, over 7.376/8.186 seconds respectively.
+The native 60-FPS objective was not achieved; see the report's method and ranges.
 CI separately validates compilation, protocol behavior and synthetic H.264 decode.
 Hardware encoder use, glass-to-glass latency, input latency, sustained thermal
 stability and battery consumption remain unmeasured.
