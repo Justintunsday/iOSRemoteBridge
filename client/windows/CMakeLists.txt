@@ -45,4 +45,5 @@ target_compile_definitions(network-smoke PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX _W
 if(MSVC)
   target_compile_options(iOSRemoteBridge PRIVATE /W4 /EHsc /utf-8)
   target_compile_options(irb-decoder PRIVATE /W4 /EHsc /utf-8)
+  target_compile_options(irb-presenter PRIVATE /W4 /EHsc /utf-8)
 endif()

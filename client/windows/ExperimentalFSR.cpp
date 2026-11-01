@@ -216,6 +216,7 @@ ExperimentalFSR::ExperimentalFSR()=default;
 ExperimentalFSR::~ExperimentalFSR()=default;
 void ExperimentalFSR::reset() { impl_.reset(); failed_=false; error_.clear(); provider_.clear(); }
 bool ExperimentalFSR::probe(std::vector<std::string> &versions) {
+    if(failed_) return false;
     try {
         if(!impl_) { impl_=std::make_unique<Impl>(); impl_->init(); }
         versions.clear(); for(auto &c:impl_->candidates) versions.push_back(c.name); return true;

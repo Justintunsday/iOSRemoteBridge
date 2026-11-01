@@ -334,6 +334,8 @@ LRESULT CALLBACK videoProcedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         if(!painted) {
             if(!advancedFailed) {
                 advancedFailed=true; EnableWindow(vsyncCheck,FALSE); EnableWindow(fsrCheck,FALSE);
+                experimentalEnabled=false; experimentalRenderer.reset(); EnableWindow(experimentalCheck,FALSE);
+                SendMessageW(experimentalCheck,BM_SETCHECK,BST_UNCHECKED,0);
                 SendMessageW(vsyncCheck,BM_SETCHECK,BST_UNCHECKED,0); SendMessageW(fsrCheck,BM_SETCHECK,BST_UNCHECKED,0);
                 SetWindowTextW(notice,L"Advanced display unavailable; using basic display.");
                 OutputDebugStringA(gpuRenderer.error().c_str());
@@ -449,7 +451,7 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
             }
             return 0;
         }
-        if(keyboardPending&&videoFocused()) return 0;
+        if(keyboardPending&&shortcutFocused()) return 0;
         if(w==VK_RETURN&&GetFocus()==bitrateEdit) { command({{"op","configure"},{"bitrate",GetDlgItemInt(hwnd,Bitrate,nullptr,FALSE)*1000}}); return 0; }
         if((GetKeyState(VK_CONTROL)&0x8000)&&w=='T') { SetFocus(textEdit); return 0; }
         if(shortcutFocused()) {
@@ -591,6 +593,9 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int show) {
                       GetDlgItem(hwnd,SendText)&&GetDlgItem(hwnd,Fit)&&GetDlgItem(hwnd,Rotate)&&
                       GetDlgItem(hwnd,Sharpness)&&SendMessageW(sharpnessSlider,TBM_GETPOS,0,0)==40&&
                       videoWindow&&SendMessageW(vsyncCheck,BM_GETCHECK,0,0)==BST_CHECKED&&
+                      SendMessageW(experimentalCheck,BM_GETCHECK,0,0)==BST_UNCHECKED&&
+                      hidUsage('H',0)==0x0b&&hidUsage(VK_OEM_PLUS,0)==0x2e&&
+                      hidUsage(VK_SHIFT,0x36LL<<16)==0xe5&&hidUsage(VK_CONTROL,1LL<<24)==0xe4&&
                       SendMessageW(ratioCheck,BM_GETCHECK,0,0)==BST_CHECKED&&
                       GetDlgItemInt(hwnd,Bitrate,nullptr,FALSE)==8000;
         for(int mode=0;mode<2;++mode) {

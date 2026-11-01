@@ -287,10 +287,12 @@
         [self reply:r result:@{@"keyboard_enabled":@NO} error:nil]; return;
     }
     if([op isEqual:@"key_event"]) {
-        if(!_control||_confirming||[self locked]||!_keyboardEnabled) {
+        BOOL down=[r[@"down"] boolValue];
+        // Key-up is cleanup, even while a prompt pauses new input.
+        if(!_control||!_keyboardEnabled||(down&&(_confirming||[self locked]))) {
             [self reply:r result:nil error:@"live keyboard mode needs separate local approval and an unlocked phone"]; return;
         }
-        BOOL ok=[_input key:[r[@"usage"] unsignedShortValue] down:[r[@"down"] boolValue]];
+        BOOL ok=[_input key:[r[@"usage"] unsignedShortValue] down:down];
         [self reply:r result:@{@"state":@"submitted"} error:ok?nil:@"keyboard HID unavailable"]; return;
     }
     if(!_control||_confirming||_gesture||[self locked]) { [self reply:r result:nil error:@"input disabled, confirmation pending, locked, or gesture busy"]; return; }
