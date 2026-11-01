@@ -31,6 +31,7 @@ bool Connection::command(json request,bool motionOnly) {
     if(!authorized_) return false;
     {
         std::lock_guard<std::mutex> lock(queueMutex_);
+        if(!authorized_||stop_) return false;
         if(!commands_.push(std::move(request),motionOnly,nowUS())) return false;
     }
     commandWake_.signal(); return true;
