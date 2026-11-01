@@ -19,6 +19,7 @@
 #include <set>
 #include <cmath>
 #include <cwchar>
+#include <chrono>
 using json=nlohmann::json;
 namespace {
 constexpr UINT FrameMessage=WM_APP+1,StatusMessage=WM_APP+2,ResponseMessage=WM_APP+3,KeyboardModeMessage=WM_APP+4;
@@ -48,6 +49,7 @@ std::wstring lastRenderNotice;
 std::set<uint16_t> heldKeys;
 bool keyboardApproved=false,keyboardPending=false,mouseCaptured=false,rawMouseReady=false;
 MouseMotion mouseMotion;
+uint64_t lastMouseSendUS=0;
 uint8_t mouseButtons=0;
 int wheelRemainder=0;
 uint64_t connectionEpoch=0;
@@ -144,8 +146,8 @@ VideoFrame rotate(VideoFrame input,int degrees) {
                     output.bgra.data()+(static_cast<size_t>(dy)*output.width+dx)*4);
     } return output;
 }
-bool command(json request) {
-    if(!connection||!connection->command(std::move(request))) {
+bool command(json request,bool motionOnly=false) {
+    if(!connection||!connection->command(std::move(request),motionOnly)) {
         SetWindowTextW(notice,L"Connect to the unlocked paired iPhone before sending commands."); return false;
     }
     return true;
@@ -157,21 +159,23 @@ bool releaseHeldKeys() {
     return ok;
 }
 void disconnect();
-bool sendSystemMouse(int wheel=0) {
+uint64_t mouseTimeUS() { return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()); }
+bool sendSystemMouse(int wheel=0,bool motionOnly=true) {
     auto delta=mouseMotion.take();
-    return command({{"op","mouse_delta"},{"dx",delta.first},{"dy",delta.second},{"buttons",mouseButtons},{"wheel",wheel}});
+    lastMouseSendUS=mouseTimeUS();
+    return command({{"op","mouse_delta"},{"dx",delta.first},{"dy",delta.second},{"buttons",mouseButtons},{"wheel",wheel}},motionOnly);
 }
 void stopMouseCapture() {
     bool captured=mouseCaptured; mouseCaptured=false; mouseMotion.clear(); wheelRemainder=0;
     if(captured) { ClipCursor(nullptr); if(GetCapture()==window) ReleaseCapture(); SetCursor(LoadCursor(nullptr,IDC_ARROW)); }
-    if(mouseButtons) { mouseButtons=0; if(keyboardApproved) sendSystemMouse(); }
+    if(mouseButtons) { mouseButtons=0; if(keyboardApproved) sendSystemMouse(0,false); }
     if(keyboardApproved) SetWindowTextW(shortcutHint,L"Click video to capture mouse");
 }
 void startMouseCapture() {
     if(mouseCaptured||!keyboardApproved||!rawMouseReady||GetForegroundWindow()!=window||videoRect.right<=videoRect.left||videoRect.bottom<=videoRect.top) return;
     RECT bounds=videoRect; MapWindowPoints(window,nullptr,reinterpret_cast<POINT *>(&bounds),2);
     if(!ClipCursor(&bounds)) { SetWindowTextW(notice,L"Cannot capture mouse; focus the viewer and click the video."); return; }
-    mouseMotion.clear(); mouseButtons=0; wheelRemainder=0; mouseCaptured=true;
+    mouseMotion.clear(); mouseButtons=0; wheelRemainder=0; lastMouseSendUS=0; mouseCaptured=true;
     SetCapture(window); SetCursor(nullptr); SetWindowTextW(shortcutHint,L"F10 releases the mouse");
 }
 void rawMouse(const RAWMOUSE &mouse) {
@@ -187,7 +191,10 @@ void rawMouse(const RAWMOUSE &mouse) {
     }
     if(flags&RI_MOUSE_WHEEL) wheelRemainder+=static_cast<SHORT>(mouse.usButtonData);
     int wheel=std::clamp(wheelRemainder/WHEEL_DELTA,-127,127); wheelRemainder-=wheel*WHEEL_DELTA;
-    if((changed||wheel)&&!sendSystemMouse(wheel)) disconnect();
+    // WM_TIMER is low priority and can starve during continuous input/painting.
+    // Send from the raw event path, bounded to 125 Hz; button edges never wait.
+    if(changed||wheel) { if(!sendSystemMouse(wheel,false)) disconnect(); }
+    else if(mouseMotion.pending()&&mouseTimeUS()-lastMouseSendUS>=8000) { if(!sendSystemMouse()) disconnect(); }
 }
 void endDrag() {
     stopMouseCapture();
@@ -622,7 +629,7 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         if(static_cast<uint64_t>(w)==connectionEpoch) {
             keyboardApproved=l!=0; keyboardPending=false; heldKeys.clear(); KillTimer(hwnd,KeyboardTimer);
             stopMouseCapture(); mouseButtons=0; mouseMotion.clear(); wheelRemainder=0; KillTimer(hwnd,PointerTimer);
-            if(keyboardApproved) SetTimer(hwnd,PointerTimer,16,nullptr);
+            if(keyboardApproved) SetTimer(hwnd,PointerTimer,8,nullptr);
             SendMessageW(keyboardCheck,BM_SETCHECK,keyboardApproved?BST_CHECKED:BST_UNCHECKED,0); EnableWindow(keyboardCheck,TRUE);
             SetWindowTextW(shortcutHint,keyboardApproved?L"Click video to capture mouse":L"H Home / C Control");
             if(keyboardApproved) { SetFocus(hwnd); startMouseCapture(); }

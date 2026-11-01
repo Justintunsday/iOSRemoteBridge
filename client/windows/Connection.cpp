@@ -27,16 +27,13 @@ void Connection::close() {
     { std::lock_guard<std::mutex> lock(socketMutex_); if(socket_!=INVALID_SOCKET) shutdown(socket_,SD_BOTH); }
     if(worker_.joinable()) worker_.join();
 }
-bool Connection::command(json request) {
+bool Connection::command(json request,bool motionOnly) {
     if(!authorized_) return false;
-    std::lock_guard<std::mutex> lock(queueMutex_);
-    if(!commands_.empty()&&request.value("op",std::string())=="touch"&&request.value("phase",-1)==1) {
-        auto &previous=commands_.back();
-        if(previous.value("op",std::string())=="touch"&&previous.value("phase",-1)==1&&
-           previous.value("finger",-1)==request.value("finger",-2)) { previous=std::move(request); return true; }
+    {
+        std::lock_guard<std::mutex> lock(queueMutex_);
+        if(!commands_.push(std::move(request),motionOnly,nowUS())) return false;
     }
-    if(commands_.size()>=128) return false;
-    commands_.push_back(std::move(request)); return true;
+    commandWake_.signal(); return true;
 }
 void Connection::run() {
     int retries=0;
@@ -48,7 +45,7 @@ void Connection::run() {
         { std::lock_guard<std::mutex> lock(queueMutex_); commands_.clear(); }
         { std::lock_guard<std::mutex> lock(socketMutex_); if(socket_!=INVALID_SOCKET) closesocket(socket_); socket_=INVALID_SOCKET; }
         if(stop_) break;
-        // Never replay input when reconnecting. Every connection requires local consent.
+        // Never replay input when reconnecting; authenticate the paired session again.
         int delay=std::min(30,3*(1+retries++));
         for(int i=0;i<delay*10&&!stop_;++i) std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
@@ -107,15 +104,19 @@ void Connection::session() {
     Decoder decoder(preferHardware_); VideoFrame frame;
     std::vector<uint8_t> received; uint8_t chunk[65536];
     uint64_t lastPing=0,statsAt=nowUS(),lastData=nowUS(),connected=nowUS(); unsigned frames=0;
-    double rtt=0,decodeMS=0; bool waitForKey=false,writeWantsRead=false,readWantsWrite=false;
+    double rtt=0,decodeMS=0,inputQueueMS=0; bool waitForKey=false,writeWantsRead=false,readWantsWrite=false;
     while(!stop_) {
         uint64_t now=nowUS();
         if(now-lastData>65000000ULL||(!authorized_&&now-connected>60000000ULL)) throw std::runtime_error("connection/startup timed out");
         if(now-lastPing>1000000) { enqueue(IRB_PING,"",now); lastPing=now; }
         if(authorized_) {
-            std::deque<json> requests;
-            { std::lock_guard<std::mutex> lock(queueMutex_); requests.swap(commands_); }
-            for(auto &r:requests) { r["id"]=++request; enqueue(IRB_CONTROL,r.dump()); }
+            std::deque<QueuedInput::Item> requests;
+            { std::lock_guard<std::mutex> lock(queueMutex_); requests=commands_.take(); }
+            for(auto &pending:requests) {
+                double waited=(nowUS()-pending.queued)/1000.0;
+                inputQueueMS=inputQueueMS*.8+waited*.2;
+                pending.request["id"]=++request; enqueue(IRB_CONTROL,pending.request.dump());
+            }
         }
         // Flush queued control and frame credits before waiting for more input.
         // A read-only 10-ms wait per packet otherwise delays ACKs behind gestures.
@@ -126,11 +127,16 @@ void Connection::session() {
             else { int error=SSL_get_error(tls.get(),result); if(error!=SSL_ERROR_WANT_READ&&error!=SSL_ERROR_WANT_WRITE) throw std::runtime_error("TLS write failed"); writeWantsRead=error==SSL_ERROR_WANT_READ; break; }
         }
         fd_set readSet,writeSet; FD_ZERO(&readSet); FD_ZERO(&writeSet); FD_SET(fd,&readSet);
+        if(commandWake_.valid()) FD_SET(commandWake_.reader(),&readSet);
         bool wantsWrite=(!outgoing.empty()&&!writeWantsRead)||readWantsWrite;
         if(wantsWrite) FD_SET(fd,&writeSet);
-        timeval delay{0,10000};
-        int ready=SSL_pending(tls.get())?1:select(0,&readSet,wantsWrite?&writeSet:nullptr,nullptr,&delay);
+        timeval delay{0,commandWake_.valid()?10000:1000};
+        bool buffered=SSL_pending(tls.get())>0;
+        int ready=buffered?1:select(0,&readSet,wantsWrite?&writeSet:nullptr,nullptr,&delay);
         if(ready<0) throw std::runtime_error("socket select failed");
+        if(!buffered&&ready>0&&commandWake_.valid()&&FD_ISSET(commandWake_.reader(),&readSet)) {
+            commandWake_.drain(); continue; // Flush fresh input before decoding another video packet.
+        }
         if(ready>0&&(SSL_pending(tls.get())||FD_ISSET(fd,&readSet)||(readWantsWrite&&FD_ISSET(fd,&writeSet)))) {
             int result=SSL_read(tls.get(),chunk,sizeof(chunk));
             if(result>0) { readWantsWrite=false; received.insert(received.end(),chunk,chunk+result); lastData=nowUS(); }
@@ -168,8 +174,8 @@ void Connection::session() {
         }
         if(nowUS()-statsAt>1000000&&authorized_) {
             double seconds=(nowUS()-statsAt)/1000000.;
-            char stats[256]; std::snprintf(stats,sizeof(stats),"%.1f FPS | RTT %.1f ms | decode %.1f ms | %s | F1 rotate, F2 30 FPS, F3 60 FPS, F4 half-size, F5 native",
-                    frames/seconds,rtt,decodeMS,decoder.backend().c_str());
+            char stats[288]; std::snprintf(stats,sizeof(stats),"%.1f FPS | RTT %.1f ms | input queue %.1f ms | decode %.1f ms | %s | F1 rotate, F2 30 FPS, F3 60 FPS, F4 half-size, F5 native",
+                    frames/seconds,rtt,inputQueueMS,decodeMS,decoder.backend().c_str());
             if(onStatus) onStatus(stats); statsAt=nowUS(); frames=0;
         }
     }

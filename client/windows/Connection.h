@@ -10,12 +10,15 @@
 #include <thread>
 #include <nlohmann/json.hpp>
 #include "Decoder.h"
+#include "CommandWake.h"
+#include "QueuedInput.h"
 class Connection {
     using json=nlohmann::json;
     std::atomic<bool> stop_{false},authorized_{false};
     std::thread worker_;
     std::mutex queueMutex_,socketMutex_;
-    std::deque<json> commands_;
+    QueuedInput commands_;
+    CommandWake commandWake_;
     SOCKET socket_=INVALID_SOCKET;
     json config_;
     bool control_,preferHardware_;
@@ -32,5 +35,5 @@ public:
     void start();
     void close();
     bool authorized() const { return authorized_; }
-    bool command(json request);
+    bool command(json request,bool motionOnly=false);
 };
