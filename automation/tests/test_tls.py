@@ -22,7 +22,7 @@ class TLSTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls): cls.temp.cleanup()
 
-    def server(self):
+    def server(self, lockscreen=False):
         listener = socket.socket()
         listener.bind(("127.0.0.1", 0)); listener.listen(1); listener.settimeout(5)
         self.addCleanup(listener.close)
@@ -31,7 +31,7 @@ class TLSTests(unittest.TestCase):
         config = json.loads((self.folder / "client-config.json").read_text())
         config["port"] = listener.getsockname()[1]
         observed = {"auth": False, "error": None, "credit": threading.Event(),
-                    "ping": threading.Event(), "deferred": threading.Event(), "credits": []}
+                    "ping": threading.Event(), "deferred": threading.Event(), "credits": [], "requests": []}
         def handle():
             try:
                 raw, _ = listener.accept()
@@ -40,6 +40,7 @@ class TLSTests(unittest.TestCase):
                     h = p.unpack(p.recv_exact(sock, 24)); auth = json.loads(p.recv_exact(sock, h.length))
                     observed["auth"] = True
                     observed["video_window"] = auth.get("video_window", 1)
+                    observed["lockscreen_view"] = auth.get("lockscreen_view", False)
                     if h.kind != p.AUTH or auth["token"] != config["token"]: return
                     def send(kind, seq, payload, pts=0):
                         body = json.dumps(payload).encode() if isinstance(payload, dict) else payload
@@ -47,7 +48,10 @@ class TLSTests(unittest.TestCase):
                         # Split both the header and payload across writes.
                         for i in range(0, len(packet), 7): sock.sendall(packet[i:i+7])
                     send(p.RESPONSE, 1, {"event": "authenticated"})
-                    send(p.RESPONSE, 2, {"event": "authorized", "device": {"model": "SIMULATOR"}})
+                    device = {"model": "SIMULATOR"}
+                    if lockscreen: device.update(lockscreen_view=True, locked=False, display_on=True,
+                        input_allowed=auth["control"], input_epoch=1, min_visible_pts=0, wake_supported=True)
+                    send(p.RESPONSE, 2, {"event": "authorized", "device": device})
                     send(p.VIDEO, 3, b"\0\0\0\1fake-frame", 12345)
                     seq = 3
                     for offset in range(1, observed["video_window"]):
@@ -62,7 +66,16 @@ class TLSTests(unittest.TestCase):
                             seq += 1; send(p.PONG, seq, data, h.pts_us)
                         elif h.kind == p.CONTROL:
                             request = json.loads(data)
+                            observed["requests"].append(request)
                             if request["op"] == "defer": observed["deferred"].set(); continue
+                            if lockscreen and request["op"] in ("get_orientation", "get_connection_status"):
+                                locked = request["op"] == "get_orientation"
+                                device.update(locked=locked, input_allowed=not locked and auth["control"],
+                                              input_epoch=2 if locked else 3, min_visible_pts=20000 if locked else 30000)
+                                # More notifications than the old event queue could hold.
+                                for _ in range(12):
+                                    seq += 1; send(p.RESPONSE, seq, {"event": "device_state", "device": device})
+                                seq += 1; send(p.VIDEO, seq, b"stale-frame", device["min_visible_pts"]-1)
                             seq += 1
                             if request["op"] == "bad_sequence":
                                 send(p.RESPONSE, seq+1, {"id": request["id"], "ok": True, "result": {}})
@@ -92,6 +105,28 @@ class TLSTests(unittest.TestCase):
             self.assertEqual(client.request("get_device_info"), {"echo": "get_device_info"})
             self.assertTrue(observed["credit"].wait(2))
             self.assertEqual(observed["credits"], [12345])
+
+    def test_lock_events_wake_and_unlock_resume_without_reconnect(self):
+        config, observed = self.server(lockscreen=True)
+        with BridgeClient(config, control=True, timeout=5) as client:
+            self.assertTrue(observed["lockscreen_view"])
+            client.request("press_home")
+            self.assertEqual(observed["requests"][-1]["input_epoch"], 1)
+            client.request("get_orientation")
+            self.assertTrue(client.device["locked"])
+            self.assertIsNone(client.last_video)
+            with self.assertRaisesRegex(BridgeError, "input suspended"): client.request("press_home")
+            client.request("wake_screen")
+            self.assertNotIn("input_epoch", observed["requests"][-1])
+            client.request("get_device_info")
+            client.request("keyboard_mode", enabled=False)
+            client.request("get_connection_status")
+            client.request("press_home")
+            self.assertFalse(client.device["locked"])
+            self.assertEqual(observed["requests"][-1]["input_epoch"], 3)
+            self.assertIn(19999, observed["credits"])
+            self.assertIn(29999, observed["credits"])
+            self.assertIsNone(client.last_video)
 
     def test_invalid_frame_window_rejected_before_network(self):
         config = json.loads((self.folder / "client-config.json").read_text())

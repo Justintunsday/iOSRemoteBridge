@@ -108,6 +108,11 @@ def create_server(adapter):
         """Submit a Home button press in the paired control session."""
         return await request("press_home")
 
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
+    async def wake_screen() -> dict:
+        """Turn on the paired iPhone's display. Requires --control; does not unlock or enter credentials."""
+        return await request("wake_screen")
+
     @server.tool(annotations=INPUT)
     async def launch_app(bundle_id: Annotated[str, Field(min_length=1, max_length=255)]) -> dict:
         """Request launching an installed app. Executes directly; private API is experimental."""

@@ -1,0 +1,106 @@
+#import "IRBSimulatorSmoke.h"
+#import "IRBControllerViewController.h"
+#import "IRBInterfaceActions.h"
+#import <TargetConditionals.h>
+#if TARGET_OS_SIMULATOR
+static BOOL smokeRequested(void) { return [NSProcessInfo.processInfo.arguments containsObject:@"--irb-smoke"]; }
+static NSURL *smokeFile(NSString *name) { return [[NSFileManager.defaultManager URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask].firstObject URLByAppendingPathComponent:name]; }
+static NSError *keychainError;
+void IRBPrepareSimulatorSmoke(void) {
+    if(!smokeRequested()) return;
+    NSData *data=[NSData dataWithContentsOfURL:smokeFile(@"irb-smoke-profile.json")];
+    IRBProfile *profile=data?[IRBProfile fromData:data error:NULL]:nil;
+    NSError *error=nil;if(profile) [IRBProfileStore save:profile error:&error];keychainError=error;
+}
+void IRBStartSimulatorSmoke(IRBControllerViewController *controller) {
+    if([NSProcessInfo.processInfo.arguments containsObject:@"--irb-warmup"]) {
+        [@"ready" writeToURL:smokeFile(@"irb-warmup-ready") atomically:YES encoding:NSUTF8StringEncoding error:NULL];return;
+    }
+    if(!smokeRequested()) return;
+    NSData *data=[NSData dataWithContentsOfURL:smokeFile(@"irb-smoke-profile.json")];IRBProfile *profile=data?[IRBProfile fromData:data error:NULL]:nil;
+    NSData *optionsData=[NSData dataWithContentsOfURL:smokeFile(@"irb-smoke-options.json")];
+    NSDictionary *options=optionsData?[NSJSONSerialization JSONObjectWithData:optionsData options:0 error:NULL]:@{};
+    BOOL pinFailure=[options[@"pin_failure"] boolValue];
+    BOOL lockMode=[options[@"ui_preview"] isEqual:@"lockscreen"];
+    NSMutableDictionary *result=[@{@"passed":@NO,@"decoded_frames":@0,@"responses":@0,@"pin_failure":@(pinFailure)} mutableCopy];
+    __block BOOL finished=NO,sent=NO;
+    void(^finish)(BOOL,NSString *)=^(BOOL ok,NSString *reason) {
+        if(finished) return;finished=YES;result[@"passed"]=ok?@YES:@NO;result[@"reason"]=reason;
+        if(ok&&lockMode) [controller previewInterface:@"locked"];
+        [[NSJSONSerialization dataWithJSONObject:result options:NSJSONWritingPrettyPrinted error:NULL] writeToURL:smokeFile(@"irb-smoke-result.json") atomically:YES];
+    };
+    void(^maybeFinish)(void)=^{
+        if([result[@"decoded_frames"] intValue]<3||[result[@"responses"] intValue]<6||controller.videoView.presentedFrameCount<2||controller.videoView.pendingFrameCount) return;
+        if(lockMode&&([result[@"responses"] intValue]<8||[result[@"decoded_frames"] intValue]<4)) return;
+        [controller.view layoutIfNeeded];[controller.videoView layoutIfNeeded];
+        CGPoint natural;CGRect bounds=controller.videoView.bounds;
+        BOOL center=[controller.videoView normalizedPoint:CGPointMake(CGRectGetMidX(bounds),CGRectGetMidY(bounds)) clamp:NO result:&natural]&&fabs(natural.x-.5)<.001&&fabs(natural.y-.5)<.001;
+        BOOL letterbox=![controller.videoView normalizedPoint:CGPointMake(1,1) clamp:NO result:&natural];result[@"coordinates_valid"]=@(center&&letterbox);
+        result[@"presented_frames"]=@(controller.videoView.presentedFrameCount);result[@"coalesced_frames"]=@(controller.videoView.coalescedFrameCount);
+        BOOL lockOK=!lockMode||([result[@"lock_input_suspended"] boolValue]&&[result[@"unlock_input_restored"] boolValue]&&[result[@"decoded_frames"] intValue]==4);
+        finish(lockOK&&[result[@"pixels_valid"] boolValue]&&center&&letterbox&&[result[@"vsync_bounded"] boolValue]&&[result[@"immediate_mode"] boolValue],@"SwiftUI, VSync, grayscale, ordered controls and lock/wake epoch barriers");
+    };
+    [NSTimer scheduledTimerWithTimeInterval:.05 repeats:YES block:^(NSTimer *timer) {if(finished) [timer invalidate];else maybeFinish();}];
+    NSString *preview=[options[@"ui_preview"] isKindOfClass:NSString.class]?options[@"ui_preview"]:nil;
+    if(preview.length) dispatch_after(dispatch_time(DISPATCH_TIME_NOW,300*NSEC_PER_MSEC),dispatch_get_main_queue(),^{[controller previewInterface:preview];});
+    void(^oldState)(IRBSessionState,NSString *)=controller.session.onState;
+    controller.session.onState=^(IRBSessionState state,NSString *message) {
+        if(oldState) oldState(state,message);
+        if(state==IRBSessionIdle&&[message containsString:@"证书"]) finish(pinFailure,message);
+    };
+    void(^oldDevice)(NSDictionary *)=controller.session.onDeviceState;
+    controller.session.onDeviceState=^(NSDictionary *device) {
+        if(oldDevice) oldDevice(device);if(!lockMode) return;
+        if([device[@"locked"] boolValue]) {
+            result[@"lock_input_suspended"]=@(!controller.videoView.controlEnabled);
+            [controller.session command:@{@"op":@"press_home"}]; // Must be discarded locally.
+            [(id<IRBInterfaceActions>)controller performOperation:@"wake_screen"];
+        } else if([result[@"lock_input_suspended"] boolValue]) {
+            result[@"unlock_input_restored"]=@(controller.videoView.controlEnabled);
+            [(id<IRBInterfaceActions>)controller performOperation:@"press_home"];
+        }
+    };
+    void(^oldFrame)(CVPixelBufferRef,uint64_t)=controller.session.onFrame;
+    controller.session.onFrame=^(CVPixelBufferRef image,uint64_t pts) {
+        if(oldFrame) oldFrame(image,pts);result[@"decoded_frames"]=@([result[@"decoded_frames"] intValue]+1);
+        if(!sent) {
+            sent=YES;size_t width=CVPixelBufferGetWidth(image),height=CVPixelBufferGetHeight(image);CVPixelBufferLockBaseAddress(image,kCVPixelBufferLock_ReadOnly);
+            uint8_t *plane=CVPixelBufferGetBaseAddressOfPlane(image,0);int black=plane?plane[0]:-1,white=plane?plane[width-1]:-1;
+            const int expected[]={0,8,16,32,64,128,192,224,235,240,248,255};
+            BOOL pixelsValid=plane&&width==192&&height==64;NSMutableArray *levels=[NSMutableArray new];
+            if(pixelsValid) for(NSUInteger i=0;i<12;++i) {
+                int value=plane[32*CVPixelBufferGetBytesPerRowOfPlane(image,0)+i*16+8];[levels addObject:@(value)];
+                if(abs(value-expected[i])>5) pixelsValid=NO;
+            }
+            CVPixelBufferUnlockBaseAddress(image,kCVPixelBufferLock_ReadOnly);
+            result[@"width"]=@(width);result[@"height"]=@(height);result[@"black"]=@(black);result[@"white"]=@(white);
+            result[@"pixels_valid"]=@(pixelsValid);result[@"luma_levels"]=levels;
+            NSUInteger before=controller.videoView.presentedFrameCount;
+            [controller.videoView display:image];[controller.videoView display:image];[controller.videoView display:image];
+            result[@"vsync_bounded"]=@(controller.videoView.vSyncEnabled&&controller.videoView.pendingFrameCount==1&&controller.videoView.presentedFrameCount==before&&controller.videoView.coalescedFrameCount>=2);
+            controller.videoView.vSyncEnabled=NO;
+            result[@"immediate_mode"]=@(controller.videoView.pendingFrameCount==0&&controller.videoView.presentedFrameCount==before+1);
+            controller.videoView.vSyncEnabled=YES;[controller.videoView display:image];
+            for(NSDictionary *request in @[@{@"op":@"touch",@"finger":@0,@"phase":@0,@"x":@.25,@"y":@.75},@{@"op":@"touch",@"finger":@0,@"phase":@1,@"x":@.4,@"y":@.5},@{@"op":@"touch",@"finger":@0,@"phase":@2,@"x":@.4,@"y":@.5}]) [controller.session command:request];
+            [(id<IRBInterfaceActions>)controller performOperation:@"press_home"];
+            [(id<IRBInterfaceActions>)controller sendRemoteText:@"IRB"];
+        }
+        maybeFinish();
+    };
+    controller.session.onResponse=^(NSDictionary *reply) {
+        if([reply[@"id"] isKindOfClass:NSNumber.class]) {
+            if(![reply[@"ok"] boolValue]) {finish(NO,@"control request failed");return;}
+            result[@"responses"]=@([result[@"responses"] intValue]+1);maybeFinish();
+        }
+    };
+    if(!profile) {finish(NO,@"test profile missing");return;}
+    IRBProfile *stored=IRBProfileStore.load;
+    result[@"keychain_valid"]=@([stored.host isEqual:profile.host]&&stored.port==profile.port&&[stored.token isEqual:profile.token]&&[stored.certificatePin isEqual:profile.certificatePin]);
+    if(![result[@"keychain_valid"] boolValue]) {result[@"keychain_status"]=@(keychainError.code);finish(NO,@"pairing Keychain round trip failed");return;}
+    [controller.session connect:profile fps:60 control:YES];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,35*NSEC_PER_SEC),dispatch_get_main_queue(),^{finish(NO,@"simulator integration timed out");});
+}
+#else
+void IRBPrepareSimulatorSmoke(void) {}
+void IRBStartSimulatorSmoke(IRBControllerViewController *controller) { (void)controller; }
+#endif

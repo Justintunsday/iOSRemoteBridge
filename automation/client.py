@@ -1,4 +1,4 @@
-"""Pinned TLS client. Paired sessions start directly while the phone is unlocked."""
+"""Pinned TLS client with negotiated lockscreen viewing and epoch-bound input."""
 import hashlib
 import hmac
 import json
@@ -15,8 +15,12 @@ from . import protocol as wire
 class BridgeError(RuntimeError):
     pass
 
+READ_OPERATIONS = frozenset({"get_device_info", "get_screen_frame", "get_orientation",
+    "get_connection_status", "get_performance_stats", "configure", "request_keyframe",
+    "disconnect", "wake_screen"})
+
 class BridgeClient:
-    def __init__(self, config, *, control=False, fps=30, timeout=60, video_window=3):
+    def __init__(self, config, *, control=False, fps=30, timeout=60, video_window=3, lockscreen_view=True):
         if isinstance(config, (str, Path)):
             config = json.loads(Path(config).read_text(encoding="utf-8"))
         self.config = dict(config)
@@ -31,6 +35,7 @@ class BridgeClient:
         if fps not in (30, 60): raise ValueError("fps must be 30 or 60")
         if type(video_window) is not int or video_window not in (1, 2, 3): raise ValueError("video_window must be 1, 2 or 3")
         self.video_window = video_window
+        self.lockscreen_view = bool(lockscreen_view)
         self.control, self.fps, self.timeout = control, fps, timeout
         self.sock = None
         self._sequence = self._rx = self._request = 0
@@ -42,6 +47,7 @@ class BridgeClient:
         self._stop = threading.Event()
         self._reader = self._heartbeat = None
         self.device = None
+        self._minimum_visible_pts = 0
         self.last_video = None
         self.last_frame_pts = None
         self.error = None
@@ -61,7 +67,7 @@ class BridgeClient:
             if not hmac.compare_digest(pin, self.config["certificate_sha256"].lower()):
                 raise BridgeError("server certificate pin mismatch; no credentials sent")
             self.sock.setblocking(False)
-            self._send(wire.AUTH, {"token": self.config["token"], "control": self.control, "fps": self.fps, "video_window": self.video_window})
+            self._send(wire.AUTH, {"token": self.config["token"], "control": self.control, "fps": self.fps, "video_window": self.video_window, "lockscreen_view": self.lockscreen_view})
             self._reader = threading.Thread(target=self._read, daemon=True)
             self._reader.start()
             deadline = time.monotonic() + self.timeout
@@ -72,7 +78,6 @@ class BridgeClient:
                 except queue.Empty as exc: raise BridgeError("device session startup timed out") from exc
                 if isinstance(event, Exception): raise event
                 if event.get("event") == "authorized":
-                    self.device = event["device"]
                     return self
                 if event.get("event") == "error": raise BridgeError(event.get("error", "device error"))
         except BaseException:
@@ -139,14 +144,27 @@ class BridgeClient:
                     self._rx += 1
                     payload = bytes(received[wire.HEADER.size:total]); del received[:total]
                     if header.kind == wire.VIDEO:
-                        self.last_video, self.last_frame_pts = payload, header.pts_us
+                        with self._pending_lock:
+                            if header.pts_us >= self._minimum_visible_pts:
+                                self.last_video, self.last_frame_pts = payload, header.pts_us
                         self._send(wire.CREDIT, pts=header.pts_us)
                     elif header.kind == wire.PONG:
                         self.rtt_ms = (time.monotonic_ns() // 1000 - header.pts_us) / 1000
                     else:
                         obj = json.loads(payload)
                         if not isinstance(obj, dict): raise BridgeError("invalid server JSON")
-                        if "id" in obj:
+                        if obj.get("event") in ("authorized", "device_state"):
+                            device = obj["device"]
+                            if not isinstance(device, dict): raise BridgeError("invalid device state")
+                            with self._pending_lock:
+                                minimum = device.get("min_visible_pts", 0)
+                                if type(minimum) is not int or minimum < 0: raise BridgeError("invalid frame barrier")
+                                if minimum != self._minimum_visible_pts:
+                                    self.last_video = self.last_frame_pts = None
+                                self.device = device
+                                self._minimum_visible_pts = minimum
+                            if obj["event"] == "authorized": self._events.put_nowait(obj)
+                        elif "id" in obj:
                             with self._pending_lock:
                                 response_queue = self._pending.get(obj["id"])
                                 if response_queue: response_queue.put_nowait(obj)
@@ -156,9 +174,13 @@ class BridgeClient:
 
     def request(self, op, **parameters):
         if self._stop.is_set(): raise self.error or BridgeError("connection closed")
-        if "id" in parameters or "op" in parameters: raise ValueError("reserved request fields")
+        if any(key in parameters for key in ("id", "op", "input_epoch")): raise ValueError("reserved request fields")
         result = queue.Queue(maxsize=1)
         with self._pending_lock:
+            if self.device and self.device.get("lockscreen_view") and op not in READ_OPERATIONS:
+                if not self.device.get("input_allowed") and not (op == "keyboard_mode" and parameters.get("enabled") is False):
+                    raise BridgeError("phone locked or control disabled; input suspended")
+                parameters["input_epoch"] = self.device["input_epoch"]
             self._request += 1
             ident = self._request
             self._pending[ident] = result

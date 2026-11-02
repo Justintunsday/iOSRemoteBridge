@@ -1,10 +1,11 @@
 # Security model and limits
 
 This is an experimental, supervised remote-control prototype. Authorization
-requires a pinned TLS connection with a random 256-bit bearer token and an
-unlocked iPhone. At the device owner's request, authenticated sessions and all
+requires a pinned TLS connection with a random 256-bit bearer token. At the
+device owner's request, authenticated sessions and all
 operations execute without custom approval dialogs. Possession of the pairing
-file authorizes viewing and requested control while unlocked.
+file authorizes viewing (including negotiated lockscreen viewing) and requested
+control while unlocked. Wake only turns the display on; unlocking remains local.
 
 - TLS is provided by Apple's Network/Security frameworks and OpenSSL or Python
   ssl. No custom cipher or password exchange is implemented. The clients verify
@@ -38,7 +39,14 @@ file authorizes viewing and requested control while unlocked.
   types/ranges and field names. Outgoing queues and command rate are bounded.
 - Only one network session is accepted. Capture starts after pairing authentication
   and expires after 15 minutes. There is no persistent on-device session overlay.
-  The owner can lock the iPhone or disconnect the client to stop it. Lock detection is
+  Disconnect the client to stop viewing. Legacy clients stop on lock; clients
+  negotiating lockscreen viewing retain viewing and wake access while locked.
+  Lock releases touches, keys and native HID devices, cancels timed input,
+  restores session-changed AssistiveTouch settings, and disables all remote input.
+  Each lock/unlock changes the required input epoch, preventing queued pre-lock
+  actions from running after unlock. Display/lock changes clear retained snapshots
+  and advertise a frame timestamp barrier so old pixels are not redisplayed.
+  Screen-off capture pauses; lit locked capture is limited to 5 FPS. Lock detection is
   dynamically checked and fails closed if the private selector is missing.
   Respring and daemon/bridge loss invalidate the session. The client discards
   queued input before reconnecting; it never retries an ambiguous gesture.

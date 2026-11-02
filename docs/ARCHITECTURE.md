@@ -2,7 +2,7 @@
 
 ```mermaid
 flowchart LR
-  W[Win32 client / Python automation] <-->|Pinned TLS 1.2+| D[mobile LaunchDaemon]
+  W[Win32 / iOS SwiftUI client / Python automation] <-->|Pinned TLS 1.2+| D[mobile LaunchDaemon]
   D <-->|0600 Unix socket, peer UID checked| S[SpringBoard bridge]
   S --> C[CARenderServer into IOSurface-backed pool]
   C --> V[VideoToolbox H.264]
@@ -22,9 +22,14 @@ Untrusted network/crypto handling is already outside SpringBoard.
 
 After pinned TLS, the client sends its random 256-bit token and requests viewing
 or control. The daemon forwards the authenticated session to SpringBoard, which
-starts immediately if the phone is unlocked. There are no custom connection or
+starts immediately. Clients negotiating lockscreen viewing may connect while
+locked; other clients require an unlocked phone. There are no custom connection or
 per-action approval dialogs. No floating control button covers the phone screen.
-Lock, expiry, disconnect, respring, timeout or repeated pipeline errors stop it.
+Lock suspends input and native HID, updates an input epoch, and retains negotiated
+viewing. Display-off pauses capture; a dedicated backlight-on operation wakes it
+without unlocking. Display transitions advertise a timestamp barrier and clear
+cached frames. Unlock restores input with the new epoch. Legacy lock, expiry,
+disconnect, respring, timeout or repeated pipeline errors stop the session.
 
 F10 uses an entitled IOHIDUserDevice in the mobile daemon. SpringBoard controls
 AssistiveTouch and validates every native input request before forwarding it over
@@ -95,6 +100,24 @@ contacts and keys. Gestures and text use timers; no blocking sleeps run on the
 SpringBoard thread. The mouse controls one contact; API contacts 0..9 permit
 multi-touch. Coordinates are normalized in the natural portrait plane. The
 viewer applies inverse rotation and rejects letterbox clicks.
+
+The iOS controller combines SwiftUI with an Objective-C core using public UIKit, Network, Security,
+VideoToolbox and AVSampleBufferDisplayLayer APIs. It imports the client pairing
+JSON through a scoped document URL and retains the token and exact certificate
+pin in a device-only Keychain item. TLS verifies the pin before AUTH. A serial
+decoder consumes every encoded access unit, and credits return in timestamp
+order after decoded images reach the main-thread renderer. Only decoded
+images may be skipped under display backpressure. With VSync enabled, CADisplayLink
+submits the latest decoded image at a display opportunity; the renderer retains
+at most one pending image and pauses its display link when there is no work.
+SwiftUI receives connection state and periodic statistics, not per-frame images.
+The floating Home control routes to the same guarded Objective-C operation path.
+Touch input tracks up to
+two contacts, applies inverse display rotation, and coalesces unsent moves
+without crossing contact begin/end boundaries. Backgrounding releases input
+and disconnects; network reconnection uses a fresh generation and discards
+old input. CI exercises this production path with temporary loopback credentials
+and synthetic video; physical controller-device validation is separate.
 
 Home, App Switcher and Control Center use dynamically guarded SpringBoard handlers. Volume
 and keyboard remain HID operations. Separate HID clients observe the physical

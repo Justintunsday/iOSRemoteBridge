@@ -10,7 +10,9 @@ int main(int argc,char **argv) {
     try {
         std::ifstream input(argv[1]); nlohmann::json config; input>>config;
         bool wrongPin=argc>2&&std::string(argv[2])=="--expect-pin-failure";
+        bool lockscreen=argc>2&&std::string(argv[2])=="--lockscreen";
         bool pixels=false,rpc=false,pinRefused=false;
+        bool lockSeen=false,unlockSeen=false,lockComplete=false,staleDisplayed=false;
         std::mutex mutex; std::condition_variable ready;
         unsigned frameCount=0,responseCount=0;
         const std::vector<nlohmann::json> actions={
@@ -31,12 +33,31 @@ int main(int argc,char **argv) {
             bool red=frame.width==64&&frame.height==64&&frame.bgra.size()==64*64*4&&
                      frame.bgra[center]<20&&frame.bgra[center+1]<20&&frame.bgra[center+2]>220;
             pixels=red&&++frameCount>=4;
+            if(lockSeen&&!unlockSeen) staleDisplayed=true;
             ready.notify_all();
+        };
+        connection.onDeviceState=[&](const nlohmann::json &device) {
+            if(!lockscreen||!device.value("lockscreen_view",false)) return;
+            if(device.value("locked",false)) {
+                lockSeen=true;
+                if(connection.inputAllowed()||connection.command({{"op","press_home"}})) throw std::runtime_error("locked input accepted locally");
+                if(!connection.command({{"op","wake_screen"}})) throw std::runtime_error("wake unavailable while locked");
+            } else if(lockSeen) {
+                unlockSeen=true;
+                if(!connection.inputAllowed()||!connection.command({{"op","press_home"}})) throw std::runtime_error("input did not resume after unlock");
+            }
         };
         connection.onResponse=[&](const nlohmann::json &r) {
             if(r.value("event",std::string())=="authorized") { connection.command(actions[0]); return; }
             if(!r.contains("ok")) return;
             bool ok=responseSucceeded(r);
+            if(lockscreen&&responseCount>=actions.size()) {
+                if(!ok) throw std::runtime_error("lock/wake RPC rejected");
+                ++responseCount;
+                if(responseCount==actions.size()+2) {
+                    std::lock_guard<std::mutex> lock(mutex);lockComplete=true;ready.notify_all();
+                }return;
+            }
             if(responseCount>=actions.size()||r.at("id")!=responseCount+1||ok!=(responseCount!=5))
                 throw std::runtime_error("action response did not match the pending request");
             ++responseCount;
@@ -45,8 +66,8 @@ int main(int argc,char **argv) {
         };
         connection.start();
         { std::unique_lock<std::mutex> lock(mutex);
-          ready.wait_for(lock,std::chrono::seconds(15),[&]{return wrongPin?pinRefused:(pixels&&rpc);});
-          result=(wrongPin?pinRefused:(pixels&&rpc))?0:1;
+          ready.wait_for(lock,std::chrono::seconds(15),[&]{return wrongPin?pinRefused:(pixels&&rpc&&(!lockscreen||(lockComplete&&frameCount>=5)));});
+          result=(wrongPin?pinRefused:(pixels&&rpc&&(!lockscreen||(lockComplete&&frameCount==5&&!staleDisplayed))))?0:1;
         }
         connection.close();
         if(!result) std::cout<<(wrongPin?"wrong pin refused before authentication":"Three-frame TLS/H.264 pipeline: ordered credits, repeated actions, legacy 0/1 replies, rejection and post-input pixels passed")<<std::endl;

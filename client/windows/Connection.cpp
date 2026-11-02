@@ -1,5 +1,6 @@
 #include "Connection.h"
 #include "irb_protocol.h"
+#include "irb_lock_policy.h"
 #include <openssl/ssl.h>
 #include <openssl/x509.h>
 #include <openssl/crypto.h>
@@ -32,6 +33,10 @@ bool Connection::command(json request,bool motionOnly) {
     {
         std::lock_guard<std::mutex> lock(queueMutex_);
         if(!authorized_||stop_) return false;
+        if(lockscreenView_&&irb_operation_is_input(request.value("op",std::string()).c_str())) {
+            if(!inputAllowed_) return false;
+            request["input_epoch"]=inputEpoch_;
+        }
         if(!commands_.push(std::move(request),motionOnly,nowUS())) return false;
     }
     commandWake_.signal(); return true;
@@ -41,9 +46,9 @@ void Connection::run() {
     while(!stop_) {
         try { session(); }
         catch(const std::exception &e) { if(onStatus) onStatus(e.what()); }
-        authorized_=false;
+        authorized_=false;inputAllowed_=false;
         if(onAuthorization) onAuthorization(false);
-        { std::lock_guard<std::mutex> lock(queueMutex_); commands_.clear(); }
+        { std::lock_guard<std::mutex> lock(queueMutex_); commands_.clear();lockscreenView_=false;inputEpoch_=0; }
         { std::lock_guard<std::mutex> lock(socketMutex_); if(socket_!=INVALID_SOCKET) closesocket(socket_); socket_=INVALID_SOCKET; }
         if(stop_) break;
         // Never replay input when reconnecting; authenticate the paired session again.
@@ -100,12 +105,13 @@ void Connection::session() {
         std::copy(payload.begin(),payload.end(),packet.begin()+IRB_HEADER_SIZE); outgoing.push_back(std::move(packet));
         if(outgoing.size()>128) throw std::runtime_error("outgoing queue limit");
     };
-    enqueue(IRB_AUTH,json({{"token",config_.at("token")},{"control",control_},{"fps",fps_},{"video_window",3}}).dump());
-    if(onStatus) onStatus("Encrypted connection; starting paired session (unlock the iPhone)");
+    enqueue(IRB_AUTH,json({{"token",config_.at("token")},{"control",control_},{"fps",fps_},{"video_window",3},{"lockscreen_view",true}}).dump());
+    if(onStatus) onStatus("Encrypted connection; starting paired session");
     Decoder decoder(preferHardware_); VideoFrame frame;
     std::vector<uint8_t> received; uint8_t chunk[65536];
     uint64_t lastPing=0,statsAt=nowUS(),lastData=nowUS(),connected=nowUS(); unsigned frames=0;
     double rtt=0,decodeMS=0,inputQueueMS=0; bool waitForKey=false,writeWantsRead=false,readWantsWrite=false;
+    uint64_t minimumVisiblePTS=0;bool locked=false,screenOff=false;
     while(!stop_) {
         uint64_t now=nowUS();
         if(now-lastData>65000000ULL||(!authorized_&&now-connected>60000000ULL)) throw std::runtime_error("connection/startup timed out");
@@ -153,6 +159,22 @@ void Connection::session() {
             if(header.type==IRB_PONG) rtt=(nowUS()-header.pts_us)/1000.0;
             else if(header.type==IRB_RESPONSE) {
                 auto reply=json::parse(payload,payload+header.length);
+                auto event=reply.value("event",std::string());
+                if(event=="authorized"||event=="device_state") {
+                    const auto &device=reply.at("device");
+                    {
+                        std::lock_guard<std::mutex> lock(queueMutex_);
+                        auto epoch=device.value("input_epoch",uint32_t{});
+                        if(epoch!=inputEpoch_) commands_.clear();
+                        lockscreenView_=device.value("lockscreen_view",false);inputEpoch_=epoch;
+                        if(lockscreenView_&&(!epoch||epoch>INT32_MAX)) throw std::runtime_error("invalid input epoch");
+                        inputAllowed_=lockscreenView_?device.value("input_allowed",false):control_;
+                    }
+                    minimumVisiblePTS=device.value("min_visible_pts",uint64_t{});
+                    locked=device.value("locked",false);
+                    screenOff=device.contains("display_on")&&device["display_on"].is_boolean()&&!device["display_on"].get<bool>();
+                    if(onDeviceState) onDeviceState(device);
+                }
                 if(reply.value("event",std::string())=="authorized") { authorized_=true; if(onAuthorization) onAuthorization(true); if(onStatus) onStatus("Paired - streaming"); }
                 if(onResponse) onResponse(reply);
             } else if(authorized_) {
@@ -160,7 +182,7 @@ void Connection::session() {
                 try {
                     if(!waitForKey||(header.flags&1)) {
                         waitForKey=false;
-                        if(decoder.decode(payload,header.length,frame)) { ++frames; if(onFrame) onFrame(std::move(frame)); }
+                        if(decoder.decode(payload,header.length,frame)&&irb_frame_visible(header.pts_us,minimumVisiblePTS)) { ++frames; if(onFrame) onFrame(std::move(frame)); }
                     }
                 } catch(const std::exception &) {
                     if(waitForKey) throw;
@@ -177,7 +199,7 @@ void Connection::session() {
             double seconds=(nowUS()-statsAt)/1000000.;
             char stats[288]; std::snprintf(stats,sizeof(stats),"%.1f FPS | RTT %.1f ms | input queue %.1f ms | decode %.1f ms | %s | F1 rotate, F2 30 FPS, F3 60 FPS, F4 half-size, F5 native",
                     frames/seconds,rtt,inputQueueMS,decodeMS,decoder.backend().c_str());
-            if(onStatus) onStatus(stats); statsAt=nowUS(); frames=0;
+            if(onStatus) onStatus(std::string(stats)+(screenOff?" | Screen off - Wake available":locked?" | Locked - viewing only":"")); statsAt=nowUS(); frames=0;
         }
     }
 }

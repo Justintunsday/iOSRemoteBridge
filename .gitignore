@@ -22,6 +22,8 @@ __pycache__/
 *.exe
 *.dll
 *.pdb
+*.ipa
+client/ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png
 *.p12
 *.pfx
 *.key

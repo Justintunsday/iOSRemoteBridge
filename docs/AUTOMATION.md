@@ -29,6 +29,7 @@ AUTH field and retains its one-frame behavior. Credits remain ordered per frame.
 | get_screen_frame | JPEG MIME, base64 data, dimensions, natural orientation |
 | get_orientation | current natural capture-plane metadata; automatic foreground-app orientation is not implemented |
 | get_connection_status | current approved-session/device info |
+| wake_screen | no parameters; requires control and negotiated lockscreen viewing; turns display on without unlocking |
 | get_performance_stats | capture/encode timing, frames, skips, memory/CPU/thermal telemetry and frame-ack EWMA |
 | tap / double_tap | x, y |
 | long_press | x, y, duration_ms (40..5000) |
@@ -51,6 +52,18 @@ The default Python connection requests viewing only; pass control=True or
 service intentionally permits one session at a time, so the GUI and a separate
 automation process cannot control it concurrently. Use one persistent adapter
 for a sequence of agent actions rather than reconnecting for each tool call.
+
+Current clients request `lockscreen_view: true` in AUTH. When the server confirms
+this feature in `authorized.device`, it keeps the connection through lock and
+emits `device_state` events with `locked`, `display_on` (null if unknown),
+`input_allowed`, `input_epoch`, `min_visible_pts`, and `wake_supported`.
+Input carries the current positive `input_epoch`, captured when queued; each
+lock/unlock changes it. Locked and stale-epoch input is refused. The SDK handles
+events in its reader and binds input automatically. `lockscreen_view=False`
+selects legacy lock/disconnect behavior. A server without feature support keeps
+its previous behavior. All encoded frames still receive ordered credits, while
+frames older than the new visibility timestamp are excluded from display/cache.
+Screen-off capture pauses; the session's existing 15-minute lease still applies.
 
 CLI examples:
 

@@ -11,9 +11,12 @@ not silently copied from the build machine into this artifact.
 1. Generate pairing files with `python tools/provision.py --host IPHONE_WIFI_IP`.
 2. Follow DEVICE_TESTING.md to provision the iPhone over SSH and start the daemon.
 3. Open iOSRemoteBridge.exe, choose client-config.json, then Connect.
-4. Keep the iPhone unlocked. Paired clients start immediately without an
-   iOSRemoteBridge Allow/Reject dialog. Lock the phone, click Disconnect or press
-   Esc to end the session. No floating remote-control button covers the screen.
+4. Paired clients start immediately without an iOSRemoteBridge Allow/Reject dialog.
+   Updated phones retain the connection while locked, suspend input, and restore
+   control after a local unlock. Click Wake to turn on the display. Sleeping
+   displays pause capture and clear old pixels; lit lock screens capture at 5 FPS.
+   Click Disconnect or press Esc to end the session. Older phone packages still
+   require the phone unlocked and disconnect on lock.
 5. Drag with the mouse for touch input. Home, App switcher and volume have buttons.
 6. Send text types US-layout ASCII directly. Arbitrary Unicode is not implemented.
 

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <!-- Synthetic identity for the ad-hoc signed simulator app only. -->
+  <key>application-identifier</key><string>IRBSIMTEST.io.github.justintunsday.iosremotebridge.controller</string>
+  <key>keychain-access-groups</key><array><string>IRBSIMTEST.io.github.justintunsday.iosremotebridge.controller</string></array>
+  <key>get-task-allow</key><true/>
+</dict></plist>

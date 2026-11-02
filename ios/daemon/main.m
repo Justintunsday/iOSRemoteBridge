@@ -198,11 +198,12 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
             _authenticated=YES;
             [self send:IRB_RESPONSE flags:0 pts:0 data:IRBJSON(@{@"event":@"authenticated"})];
             BOOL control=[auth[@"control"] isKindOfClass:NSNumber.class]&&[auth[@"control"] boolValue];
+            BOOL lockscreen=[auth[@"lockscreen_view"] isKindOfClass:NSNumber.class]&&[auth[@"lockscreen_view"] boolValue];
             int fps=([auth[@"fps"] isKindOfClass:NSNumber.class]&&[auth[@"fps"] intValue]==60)?60:30;
             unsigned requested=[IRBNumber(auth[@"video_window"]) unsignedIntValue];
             unsigned window=requested>=1&&requested<=IRB_MAX_VIDEO_WINDOW?requested:1;
             irb_window_init(&_videoWindow,window);
-            [_bridge send:IRB_START flags:0 pts:0 data:IRBJSON(@{@"control":@(control),@"fps":@(fps),@"video_window":@(window),@"session":@(_generation)})];
+            [_bridge send:IRB_START flags:0 pts:0 data:IRBJSON(@{@"control":@(control),@"lockscreen_view":@(lockscreen),@"fps":@(fps),@"video_window":@(window),@"session":@(_generation)})];
         } else if(h.type==IRB_PING) [self send:IRB_PONG flags:0 pts:h.pts_us data:data];
         else if(h.type==IRB_CREDIT) {
             if(!_authorized||h.length||!irb_window_ack(&_videoWindow,h.pts_us)) { [self disconnect:@"invalid frame acknowledgement"]; return; }
@@ -274,6 +275,9 @@ static BOOL tokenEqual(NSString *a,NSString *b) {
         NSDictionary *r=IRBDictionary(data);
         if(IRBNumber(r[@"id"])&&[r[@"id"] intValue]==0) return; // internal adaptive bitrate response
         if([r[@"event"] isEqual:@"authorized"]) _authorized=YES;
+        if([r[@"event"] isEqual:@"device_state"]&&[r[@"device"][@"locked"] boolValue]) {
+            [_nativeHID stop];_nativeHID=nil;
+        }
         if([r[@"result"] isKindOfClass:NSDictionary.class]&&r[@"result"][@"encoded_frames"]) {
             NSMutableDictionary *stats=[r[@"result"] mutableCopy];
             stats[@"capture_to_client_ack_ms_ewma"]=@(_frameCycleMs);
