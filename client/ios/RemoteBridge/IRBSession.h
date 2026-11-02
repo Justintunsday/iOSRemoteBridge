@@ -8,6 +8,7 @@ typedef NS_ENUM(NSInteger,IRBSessionState) { IRBSessionIdle,IRBSessionConnecting
 @property(nonatomic,copy,nullable) void(^onFrame)(CVPixelBufferRef image,uint64_t pts);
 @property(nonatomic,copy,nullable) void(^onStats)(NSDictionary *stats);
 @property(nonatomic,copy,nullable) void(^onResponse)(NSDictionary *response);
+@property(nonatomic,copy,nullable) void(^onDeviceState)(NSDictionary *device);
 - (void)connect:(IRBProfile *)profile fps:(int)fps control:(BOOL)control;
 - (void)disconnect;
 - (void)command:(NSDictionary *)request;

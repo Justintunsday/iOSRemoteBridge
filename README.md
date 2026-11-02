@@ -56,7 +56,8 @@ future work. ScreenCaptureKit is unavailable on iOS 16.1.1.
 2. Follow [DEVICE_TESTING.md](docs/DEVICE_TESTING.md) to provision over SSH,
    install the package, load the daemon and keep a recovery path available.
 3. Extract the entire Windows artifact, launch iOSRemoteBridge.exe, select the
-   local pairing JSON and connect to the unlocked iPhone; no app approval dialog.
+   local pairing JSON and connect; no app approval dialog. Updated clients keep
+   viewing through lock, offer Wake, and resume input after a local unlock.
 4. For automation follow [AUTOMATION.md](docs/AUTOMATION.md). Viewing is the
    default; input needs `--control`; paired clients execute operations directly. Lock the iPhone or
    disconnect the client to end the session.

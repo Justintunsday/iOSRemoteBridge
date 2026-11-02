@@ -48,7 +48,8 @@ Connect with the Windows client or `python -m automation --config
 credentials/pairing/client-config.json get_device_info`. The unlocked paired
 phone must start streaming immediately without an iOSRemoteBridge approval
 window. Verify wrong pairing credentials fail, read-only sessions reject input,
-and a locked phone refuses capture. Verify black/protected content stays protected. Do not
+and locked phones reject input. Updated clients negotiate lockscreen viewing;
+legacy clients still disconnect on lock. Verify black/protected content stays protected. Do not
 disable content protections to make a black capture appear.
 
 Check get_device_info reports the correct model and iOS version. Confirm native

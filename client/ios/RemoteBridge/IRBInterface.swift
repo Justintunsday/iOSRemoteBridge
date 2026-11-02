@@ -21,12 +21,17 @@ private final class RemoteModel: ObservableObject {
     @Published var showImporter = false
     @Published var showText = false
     @Published var floatingHome: Bool
+    @Published var locked = false
+    @Published var screenOff = false
+    @Published var inputAllowed = false
+    @Published var wakeSupported = false
     var connected: Bool { state == 2 }
+    var canControl: Bool { connected && inputAllowed }
 
     init(video: IRBVideoView, actions: IRBInterfaceActions, host: String, port: String, paired: Bool, fps: Int, scale: Double, vsync: Bool) {
         self.video = video; self.actions = actions; self.host = host; self.port = port
         self.paired = paired; self.fps = fps; self.scale = scale; self.vsync = vsync
-        self.message = paired ? "配对已保存，请保持被控 iPhone 解锁" : "导入配对文件，连接你的 iPhone"
+        self.message = paired ? "配对已保存，可以连接设备" : "导入配对文件，连接你的 iPhone"
         self.floatingHome = UserDefaults.standard.object(forKey: "floatingHome") as? Bool ?? true
     }
     func connect() {
@@ -38,7 +43,7 @@ private final class RemoteModel: ObservableObject {
         actions?.cancelInput(); actions?.disconnect(); showImporter = true
     }
     func perform(_ operation: String) {
-        guard connected else { return }
+        guard connected && (inputAllowed || operation == "wake_screen") else { return }
         actions?.perform(operation: operation)
     }
     func preferencesChanged() { actions?.quality(fps: fps, scale: scale, vsync: vsync) }
@@ -65,7 +70,15 @@ final class IRBInterfaceHost: NSObject {
     @objc(updateConnectionState:message:)
     func updateConnectionState(_ state: Int, message: String) {
         model.state = state; model.message = message
-        if state != 2 { model.decodedFPS = 0; model.rtt = 0; model.showText = false }
+        if state != 2 {
+            model.decodedFPS = 0; model.rtt = 0; model.showText = false
+            model.locked = false; model.screenOff = false; model.inputAllowed = false; model.wakeSupported = false
+        }
+    }
+    @objc(updateDeviceLocked:screenOff:inputAllowed:wakeSupported:)
+    func updateDeviceLocked(_ locked: Bool, screenOff: Bool, inputAllowed: Bool, wakeSupported: Bool) {
+        model.locked = locked; model.screenOff = screenOff; model.inputAllowed = inputAllowed; model.wakeSupported = wakeSupported
+        if !inputAllowed { model.showText = false }
     }
     @objc(updateProfileHost:port:)
     func updateProfileHost(_ host: String, port: String) {
@@ -214,7 +227,21 @@ private struct RemoteScreen: View {
                     }
                     Spacer()
                 }.padding(12)
-                if model.connected && model.floatingHome { FloatingHome(model: model, size: geometry.size) }
+                if model.connected && (model.locked || model.screenOff) {
+                    VStack {
+                        Spacer()
+                        VStack(spacing: 10) {
+                            Label(model.screenOff ? "屏幕已熄灭，连接保持中" : "设备已锁定", systemImage: "lock.fill")
+                                .font(.subheadline.weight(.medium))
+                            Text("在被控 iPhone 解锁后自动恢复控制").font(.caption).foregroundColor(.secondary)
+                            if model.wakeSupported {
+                                Button { model.perform("wake_screen") } label: { Label("亮屏", systemImage: "sun.max") }
+                                    .buttonStyle(.borderedProminent).accessibilityIdentifier("remote.wake")
+                            }
+                        }.padding(16).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    }.padding(20)
+                }
+                if model.canControl && model.floatingHome { FloatingHome(model: model, size: geometry.size) }
             }
             .clipShape(RoundedRectangle(cornerRadius: model.fullscreen ? 0 : 18))
             .environment(\.colorScheme, .dark)
@@ -224,11 +251,14 @@ private struct RemoteScreen: View {
     private var controls: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 4) {
-                tool("多任务", "square.stack") { model.perform("app_switcher") }
-                tool("控制中心", "switch.2") { model.perform("control_center") }
-                tool("音量−", "speaker.minus") { model.perform("volume_down") }
-                tool("音量＋", "speaker.plus") { model.perform("volume_up") }
-                tool("文字", "keyboard") { model.openText() }
+                if model.wakeSupported { tool("亮屏", "sun.max") { model.perform("wake_screen") } }
+                Group {
+                    tool("多任务", "square.stack") { model.perform("app_switcher") }
+                    tool("控制中心", "switch.2") { model.perform("control_center") }
+                    tool("音量−", "speaker.minus") { model.perform("volume_down") }
+                    tool("音量＋", "speaker.plus") { model.perform("volume_up") }
+                    tool("文字", "keyboard") { model.openText() }
+                }.disabled(!model.canControl)
                 tool("旋转", "rotate.right") { model.actions?.rotate() }
             }.padding(.horizontal, 8)
         }

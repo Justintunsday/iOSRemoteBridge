@@ -15,6 +15,9 @@
 class Connection {
     using json=nlohmann::json;
     std::atomic<bool> stop_{false},authorized_{false};
+    std::atomic<bool> inputAllowed_{false};
+    bool lockscreenView_=false;
+    uint32_t inputEpoch_=0;
     std::thread worker_;
     std::mutex queueMutex_,socketMutex_;
     QueuedInput commands_;
@@ -30,10 +33,12 @@ public:
     std::function<void(const std::string &)> onStatus;
     std::function<void(const json &)> onResponse;
     std::function<void(bool)> onAuthorization;
+    std::function<void(const json &)> onDeviceState;
     Connection(json config,bool control=true,int fps=60,bool hardware=true);
     ~Connection();
     void start();
     void close();
     bool authorized() const { return authorized_; }
+    bool inputAllowed() const { return inputAllowed_; }
     bool command(json request,bool motionOnly=false);
 };

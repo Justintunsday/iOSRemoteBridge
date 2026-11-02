@@ -2,7 +2,7 @@ name: build-ios-controller
 on:
   push:
     branches: [main, 'feature/**', 'codex/**']
-    paths: ['client/ios/**', 'shared/irb_protocol.h', 'tools/ios_controller*', 'docs/IOS_CLIENT.md', '.github/workflows/build-ios-controller.yml']
+    paths: ['client/ios/**', 'shared/irb_protocol.h', 'shared/irb_lock_policy.h', 'tools/ios_controller*', 'docs/IOS_CLIENT.md', '.github/workflows/build-ios-controller.yml']
   pull_request:
   workflow_dispatch:
 permissions:

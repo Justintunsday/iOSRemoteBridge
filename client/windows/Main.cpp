@@ -22,7 +22,7 @@
 #include <chrono>
 using json=nlohmann::json;
 namespace {
-constexpr UINT FrameMessage=WM_APP+1,StatusMessage=WM_APP+2,ResponseMessage=WM_APP+3,KeyboardModeMessage=WM_APP+4;
+constexpr UINT FrameMessage=WM_APP+1,StatusMessage=WM_APP+2,ResponseMessage=WM_APP+3,KeyboardModeMessage=WM_APP+4,DeviceStateMessage=WM_APP+5;
 constexpr UINT_PTR KeyboardTimer=1,PointerTimer=2;
 constexpr int ExpandedToolbarHeight=280;
 constexpr UINT ToggleToolbarSystem=0x0100;
@@ -30,6 +30,7 @@ HWND window,configEdit,textEdit,bitrateEdit,controlCheck,notice;
 HWND browseButton,connectButton,disconnectButton,homeButton,switcherButton,volumeUpButton,volumeDownButton;
 HWND sendTextButton,bitrateLabel,rotateButton,fitButton,ratioCheck,sharpnessSlider,sharpnessLabel;
 HWND toggleToolbarButton;
+HWND wakeButton;
 HWND videoWindow,vsyncCheck,fsrCheck;
 HWND keyboardCheck,shortcutHint;
 HWND experimentalCheck,experimentalVersions;
@@ -48,6 +49,7 @@ std::string responseNotice;
 std::wstring lastRenderNotice;
 std::set<uint16_t> heldKeys;
 bool keyboardApproved=false,keyboardPending=false,mouseCaptured=false,rawMouseReady=false;
+bool remoteLocked=false,remoteScreenOff=false;
 MouseMotion mouseMotion;
 uint64_t lastMouseSendUS=0;
 uint8_t mouseButtons=0;
@@ -69,16 +71,16 @@ int viewWidth=750,viewHeight=1334;
 RECT sizingStart{};
 double lastX=0,lastY=0;
 ULONGLONG lastMove=0;
-enum {Config=10,Browse,Connect,Disconnect,Home,Switcher,VolumeUp,VolumeDown,SendText,Bitrate,Rotate,Fit,KeepRatio,Sharpness,ToggleToolbar,VSync,FSR,KeyboardMode,ExperimentalMode,ExperimentalVersion};
+enum {Config=10,Browse,Connect,Disconnect,Home,Switcher,VolumeUp,VolumeDown,SendText,Bitrate,Rotate,Fit,KeepRatio,Sharpness,ToggleToolbar,VSync,FSR,KeyboardMode,ExperimentalMode,ExperimentalVersion,Wake};
 int toolbarHeight() { return toolbarVisible?ExpandedToolbarHeight:0; }
 int minimumClientWidth() {
     int minimum=toolbarVisible?380:160;
     return keepRatio?std::max(minimum,static_cast<int>(std::ceil(120.0*viewWidth/viewHeight))):minimum;
 }
-std::array<HWND,26> toolbarControls() {
+std::array<HWND,27> toolbarControls() {
     return {configEdit,browseButton,connectButton,disconnectButton,controlCheck,homeButton,
             switcherButton,volumeUpButton,volumeDownButton,textEdit,sendTextButton,bitrateEdit,
-            bitrateLabel,rotateButton,fitButton,ratioCheck,sharpnessLabel,sharpnessSlider,notice,toggleToolbarButton,vsyncCheck,fsrCheck,keyboardCheck,shortcutHint,experimentalCheck,experimentalVersions};
+            bitrateLabel,rotateButton,fitButton,ratioCheck,sharpnessLabel,sharpnessSlider,notice,toggleToolbarButton,vsyncCheck,fsrCheck,keyboardCheck,shortcutHint,experimentalCheck,experimentalVersions,wakeButton};
 }
 std::wstring wide(const std::string &text) {
     int size=MultiByteToWideChar(CP_UTF8,0,text.data(),static_cast<int>(text.size()),nullptr,0);
@@ -109,6 +111,7 @@ void layoutControls(int width) {
     place(controlCheck,162,36,128); place(fitButton,296,36,54);
     place(homeButton,8,66,54); place(switcherButton,68,66,90);
     place(volumeUpButton,164,66,44); place(volumeDownButton,214,66,44); place(rotateButton,264,66,64);
+    place(wakeButton,334,66,42);
     int textWidth=width-204;
     place(textEdit,8,96,textWidth); place(sendTextButton,14+textWidth,96,70);
     place(bitrateEdit,90+textWidth,96,60); place(bitrateLabel,156+textWidth,100,40,20);
@@ -148,7 +151,10 @@ VideoFrame rotate(VideoFrame input,int degrees) {
 }
 bool command(json request,bool motionOnly=false) {
     if(!connection||!connection->command(std::move(request),motionOnly)) {
-        SetWindowTextW(notice,L"Connect to the unlocked paired iPhone before sending commands."); return false;
+        if(connection&&connection->authorized()&&!connection->inputAllowed()) {
+            SetWindowTextW(notice,L"Input suspended. Unlock the iPhone to resume control.");return true;
+        }
+        SetWindowTextW(notice,L"Connect to the paired iPhone before sending commands."); return false;
     }
     return true;
 }
@@ -264,6 +270,7 @@ void disconnect() {
     mouseMotion.clear(); wheelRemainder=0;
     SendMessageW(keyboardCheck,BM_SETCHECK,BST_UNCHECKED,0); EnableWindow(keyboardCheck,TRUE);
     if(connection) connection->close(); connection.reset();
+    remoteLocked=remoteScreenOff=false;EnableWindow(wakeButton,FALSE);
     { std::lock_guard<std::mutex> lock(frameMutex); frame.reset(); }
     InvalidateRect(videoWindow,nullptr,FALSE); SetWindowTextW(window,L"iOSRemoteBridge - disconnected");
 }
@@ -289,6 +296,14 @@ void connectClient() {
             PostMessageW(window,StatusMessage,0,0);
         };
         connection->onAuthorization=[epoch](bool) { PostMessageW(window,KeyboardModeMessage,static_cast<WPARAM>(epoch),0); };
+        connection->onDeviceState=[epoch,minimum=uint64_t{}](const json &device) mutable {
+            auto next=device.value("min_visible_pts",uint64_t{});
+            if(next!=minimum) { std::lock_guard<std::mutex> lock(frameMutex);frame.reset(); }minimum=next;
+            bool off=device.contains("display_on")&&device["display_on"].is_boolean()&&!device["display_on"].get<bool>();
+            LPARAM flags=(device.value("locked",false)?1:0)|(off?2:0)|
+                (device.value("input_allowed",true)?4:0)|(device.value("wake_supported",false)?8:0);
+            PostMessageW(window,DeviceStateMessage,static_cast<WPARAM>(epoch),flags);
+        };
         connection->onResponse=[epoch](const json &reply) {
             if(reply.value("op",std::string())=="keyboard_mode") {
                 bool enabled=responseSucceeded(reply)&&reply.contains("result")&&reply["result"].value("keyboard_enabled",false);
@@ -306,7 +321,7 @@ void connectClient() {
 void toggleKeyboardMode() {
     if(!rawMouseReady) { SetWindowTextW(notice,L"Raw mouse input unavailable on this Windows session."); return; }
     if(keyboardPending) { SetWindowTextW(notice,L"Switching system mouse and keyboard mode..."); return; }
-    if(!connection||!connection->authorized()) {
+    if(!connection||!connection->authorized()||!connection->inputAllowed()) {
         SendMessageW(keyboardCheck,BM_SETCHECK,BST_UNCHECKED,0);
         SetWindowTextW(notice,L"Connect with Request control to the unlocked iPhone first."); return;
     }
@@ -375,7 +390,7 @@ LRESULT CALLBACK videoProcedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         gpuRenderer.setFSR(!experimentalActive&&SendMessageW(fsrCheck,BM_GETCHECK,0,0)==BST_CHECKED);
         RECT image{};
         bool painted=gpuRenderer.paint(hwnd,area.right,area.bottom,*displayPixels,image);
-        if(painted&&connection&&connection->authorized()&&!keyboardPending) {
+        if(painted&&connection&&connection->authorized()&&!keyboardPending&&!remoteLocked&&!remoteScreenOff) {
             ULONGLONG now=GetTickCount64(); if(!drawSince) drawSince=now;
             ++drawCount;
             if(now-drawSince>=1000) { drawFPS=1000.0*drawCount/(now-drawSince); drawCount=0; drawSince=now; }
@@ -435,6 +450,7 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         bitrateEdit=control(L"EDIT",L"8000",WS_BORDER|ES_NUMBER,606,39,60,25,Bitrate);
         bitrateLabel=control(L"STATIC",L"kbps",0,672,43,95,20,0);
         rotateButton=control(L"BUTTON",L"Rotate",0,0,0,64,24,Rotate);
+        wakeButton=control(L"BUTTON",L"Wake",0,0,0,42,24,Wake);EnableWindow(wakeButton,FALSE);
         fitButton=control(L"BUTTON",L"Fit",0,0,0,54,24,Fit);
         ratioCheck=control(L"BUTTON",L"Keep ratio",BS_AUTOCHECKBOX,0,0,126,24,KeepRatio);
         SendMessageW(ratioCheck,BM_SETCHECK,BST_CHECKED,0);
@@ -470,6 +486,7 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         case Connect: connectClient(); return 0;
         case Disconnect: disconnect(); return 0;
         case Home: command({{"op","press_home"}}); return 0;
+        case Wake: command({{"op","wake_screen"}}); return 0;
         case Switcher: command({{"op","app_switcher"}}); return 0;
         case VolumeUp: command({{"op","volume_up"}}); return 0;
         case VolumeDown: command({{"op","volume_down"}}); return 0;
@@ -602,9 +619,11 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         HMENU menu=CreatePopupMenu();
         if(menu) {
             AppendMenuW(menu,MF_STRING|(toolbarVisible?MF_CHECKED:MF_UNCHECKED),ToggleToolbar,L"Show toolbar\tF9");
+            if(IsWindowEnabled(wakeButton)) AppendMenuW(menu,MF_STRING,Wake,L"Wake iPhone");
             UINT selected=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,position.x,position.y,0,hwnd,nullptr);
             DestroyMenu(menu);
             if(selected==ToggleToolbar) setToolbarVisible(!toolbarVisible);
+            else if(selected==Wake) command({{"op","wake_screen"}});
         }
         return 0;
     }
@@ -627,14 +646,25 @@ LRESULT CALLBACK procedure(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
     case ResponseMessage: { std::lock_guard<std::mutex> lock(statusMutex); noticeUntil=GetTickCount64()+5000; lastRenderNotice.clear(); SetWindowTextW(notice,wide(responseNotice).c_str()); return 0; }
     case KeyboardModeMessage:
         if(static_cast<uint64_t>(w)==connectionEpoch) {
-            keyboardApproved=l!=0; keyboardPending=false; heldKeys.clear(); KillTimer(hwnd,KeyboardTimer);
+            keyboardApproved=l!=0&&connection&&connection->inputAllowed(); keyboardPending=false; heldKeys.clear(); KillTimer(hwnd,KeyboardTimer);
             stopMouseCapture(); mouseButtons=0; mouseMotion.clear(); wheelRemainder=0; KillTimer(hwnd,PointerTimer);
             if(keyboardApproved) SetTimer(hwnd,PointerTimer,8,nullptr);
-            SendMessageW(keyboardCheck,BM_SETCHECK,keyboardApproved?BST_CHECKED:BST_UNCHECKED,0); EnableWindow(keyboardCheck,TRUE);
+            SendMessageW(keyboardCheck,BM_SETCHECK,keyboardApproved?BST_CHECKED:BST_UNCHECKED,0); EnableWindow(keyboardCheck,connection&&connection->inputAllowed());
             SetWindowTextW(shortcutHint,keyboardApproved?L"Click video to capture mouse":L"H Home / C Control");
             if(keyboardApproved) { SetFocus(hwnd); startMouseCapture(); }
             lastRenderNotice.clear();
         } return 0;
+    case DeviceStateMessage:
+        if(static_cast<uint64_t>(w)==connectionEpoch) {
+            remoteLocked=(l&1)!=0;remoteScreenOff=(l&2)!=0;bool allowed=(l&4)!=0;
+            if(!allowed) {
+                SendMessageW(hwnd,KeyboardModeMessage,w,0);endDrag();heldKeys.clear();
+            }
+            for(HWND child:{homeButton,switcherButton,volumeUpButton,volumeDownButton,textEdit,sendTextButton,keyboardCheck}) EnableWindow(child,allowed);
+            EnableWindow(wakeButton,(l&8)!=0);
+            SetWindowTextW(notice,remoteScreenOff?L"Screen off; connection kept alive. Click Wake to turn on the display.":remoteLocked?L"Locked: viewing only. Unlock on the iPhone to resume control.":L"Connected. Input is available after unlocking.");
+            lastRenderNotice.clear();InvalidateRect(videoWindow,nullptr,FALSE);
+        }return 0;
     case WM_ENTERSIZEMOVE: endDrag(); GetWindowRect(hwnd,&sizingStart); return 0;
     case WM_SIZING:
         if(keepRatio) { constrainSize(hwnd,static_cast<UINT>(w),*reinterpret_cast<RECT *>(l)); return TRUE; }

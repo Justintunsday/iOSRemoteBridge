@@ -6,6 +6,7 @@
 #import <Security/SecProtocolOptions.h>
 #import <CommonCrypto/CommonDigest.h>
 #include <stdatomic.h>
+#include "../../../shared/irb_lock_policy.h"
 @interface IRBOutbound : NSObject
 @property(nonatomic) uint8_t type;
 @property(nonatomic) uint64_t pts;
@@ -24,6 +25,9 @@
     NSMutableDictionary<NSNumber *,NSString *> *_pending;
     NSMutableArray<NSNumber *> *_inflight;
     _Atomic(uint64_t) _generation;
+    _Atomic(uint64_t) _minimumVisiblePTS;
+    _Atomic(uint32_t) _inputEpoch;
+    _Atomic(bool) _lockscreenView,_inputAllowed;
     uint32_t _tx,_request;
     uint64_t _connectedAt,_lastData,_statsAt,_lastKeyRequest,_frames;
     uint64_t _lastVideoPTS;
@@ -33,7 +37,11 @@
     NSString *_tlsFailure;
 }
 - (instancetype)init {
-    if((self=[super init])) { atomic_init(&_generation,0);_queue=dispatch_queue_create("irb.controller.network",dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL,QOS_CLASS_USER_INTERACTIVE,0)); }
+    if((self=[super init])) {
+        atomic_init(&_generation,0);atomic_init(&_minimumVisiblePTS,0);atomic_init(&_inputEpoch,0);
+        atomic_init(&_lockscreenView,false);atomic_init(&_inputAllowed,false);
+        _queue=dispatch_queue_create("irb.controller.network",dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL,QOS_CLASS_USER_INTERACTIVE,0));
+    }
     return self;
 }
 - (uint64_t)generation { return atomic_load(&_generation); }
@@ -47,6 +55,7 @@
     if(_connection) { nw_connection_cancel(_connection);_connection=nil; }
     [_decoder invalidate];_decoder=nil;_reader=nil;
     _authorized=NO;_sending=NO;[_outgoing removeAllObjects];[_pending removeAllObjects];[_inflight removeAllObjects];
+    atomic_store(&_inputAllowed,false);atomic_store(&_lockscreenView,false);atomic_store(&_inputEpoch,0);atomic_store(&_minimumVisiblePTS,0);
 }
 - (void)connect:(IRBProfile *)profile fps:(int)fps control:(BOOL)control {
     dispatch_async(_queue,^{
@@ -67,7 +76,7 @@
     _reader=[IRBPacketReader new];_decoder=[IRBVideoDecoder new];_outgoing=[NSMutableArray new];_pending=[NSMutableDictionary new];_inflight=[NSMutableArray new];_lastVideoPTS=0;
     _tx=_request=0;_frames=0;_rtt=0;_tlsFailure=nil;_sending=NO;_authorized=NO;
     _connectedAt=_lastData=_statsAt=IRBClientNow();_lastKeyRequest=0;
-    [self state:IRBSessionConnecting message:@"正在连接，请保持被控 iPhone 解锁"];
+    [self state:IRBSessionConnecting message:@"正在连接设备"];
     NSData *pin=_profile.pinBytes;__weak IRBSession *weak=self;
     nw_parameters_t parameters=nw_parameters_create_secure_tcp(^(nw_protocol_options_t tls) {
         sec_protocol_options_t options=nw_tls_copy_sec_protocol_options(tls);
@@ -103,7 +112,7 @@
         (void)error;IRBSession *owner=weak;if(!owner||owner.generation!=generation) return;
         if(state==nw_connection_state_ready) {
             IRBOutbound *auth=[IRBOutbound new];auth.type=IRB_AUTH;
-            auth.object=[@{@"token":owner->_profile.token,@"control":owner->_control?@YES:@NO,@"fps":@(owner->_fps),@"video_window":@3} mutableCopy];
+            auth.object=[@{@"token":owner->_profile.token,@"control":owner->_control?@YES:@NO,@"fps":@(owner->_fps),@"video_window":@3,@"lockscreen_view":@YES} mutableCopy];
             [owner->_outgoing addObject:auth];[owner flush];[owner receive:generation];
         } else if(state==nw_connection_state_failed||(state==nw_connection_state_waiting&&owner->_tlsFailure))
             [owner failed:owner->_tlsFailure?:@"连接失败，请检查地址、局域网权限及其他控制端是否已断开" retry:owner->_tlsFailure==nil];
@@ -138,10 +147,19 @@
         owner->_sending=NO;if(error) [owner failed:@"连接已中断" retry:YES];else [owner flush];
     });
 }
-- (void)command:(NSDictionary *)request { dispatch_async(_queue,^{[self commandOnQueue:request];}); }
+- (void)command:(NSDictionary *)request {
+    NSMutableDictionary *bound=[request mutableCopy];uint64_t generation=self.generation;
+    if(irb_operation_is_input([request[@"op"] UTF8String])&&atomic_load(&_lockscreenView)) {
+        if(!atomic_load(&_inputAllowed)) return;
+        bound[@"input_epoch"]=@(atomic_load(&_inputEpoch));
+    }
+    dispatch_async(_queue,^{if(self.generation==generation) [self commandOnQueue:bound];});
+}
 - (void)commandOnQueue:(NSDictionary *)request {
     if(!_authorized||!_connection) return;
     NSString *op=[request[@"op"] isKindOfClass:NSString.class]?request[@"op"]:nil;if(!op) return;
+    if(atomic_load(&_lockscreenView)&&irb_operation_is_input(op.UTF8String)&&
+       (!atomic_load(&_inputAllowed)||[request[@"input_epoch"] unsignedIntValue]!=atomic_load(&_inputEpoch))) return;
     IRBOutbound *last=_outgoing.lastObject;
     if([op isEqualToString:@"touch"]&&[request[@"phase"] intValue]==1&&last.type==IRB_CONTROL&&
        [last.object[@"op"] isEqual:@"touch"]&&[last.object[@"phase"] intValue]==1&&[last.object[@"finger"] isEqual:request[@"finger"]]) {
@@ -170,6 +188,21 @@
     if(header.type==IRB_PONG) { uint64_t now=IRBClientNow();if(header.pts_us<=now) _rtt=(now-header.pts_us)/1000.0;return; }
     if(header.type==IRB_RESPONSE) {
         NSDictionary *reply=IRBClientJSON(packet.payload);if(!reply) { [self failed:@"服务器响应格式不正确" retry:NO];return; }
+        if([reply[@"event"] isEqual:@"authorized"]||[reply[@"event"] isEqual:@"device_state"]) {
+            NSDictionary *device=reply[@"device"];
+            if(![device isKindOfClass:NSDictionary.class]) { [self failed:@"设备状态格式不正确" retry:NO];return; }
+            BOOL negotiated=[device[@"lockscreen_view"] boolValue];uint32_t epoch=[device[@"input_epoch"] unsignedIntValue];
+            if(negotiated&&(epoch==0||epoch>INT32_MAX)) { [self failed:@"输入状态格式不正确" retry:NO];return; }
+            if(epoch!=atomic_load(&_inputEpoch)) {
+                for(IRBOutbound *out in [_outgoing copy]) if(out.type==IRB_CONTROL&&irb_operation_is_input([out.object[@"op"] UTF8String])) {
+                    [_pending removeObjectForKey:out.object[@"id"]];[_outgoing removeObject:out];
+                }
+            }
+            atomic_store(&_minimumVisiblePTS,[device[@"min_visible_pts"] unsignedLongLongValue]);
+            atomic_store(&_inputEpoch,epoch);atomic_store(&_inputAllowed,negotiated?[device[@"input_allowed"] boolValue]:_control);
+            atomic_store(&_lockscreenView,negotiated);
+            dispatch_async(dispatch_get_main_queue(),^{if(self.generation==generation&&self.onDeviceState) self.onDeviceState(device);});
+        }
         if([reply[@"event"] isEqual:@"authorized"]) {
             if(_authorized) { [self failed:@"重复的授权响应" retry:NO];return; }
             _authorized=YES;_retries=0;_frames=0;_statsAt=IRBClientNow();[self state:IRBSessionStreaming message:@"已连接"];
@@ -188,7 +221,7 @@
         IRBSession *owner=weak;if(!owner||owner.generation!=generation) return;
         if(image) CVPixelBufferRetain(image);
         dispatch_async(dispatch_get_main_queue(),^{
-            if(owner.generation==generation&&image&&owner.onFrame) owner.onFrame(image,pts);
+            if(owner.generation==generation&&image&&irb_frame_visible(pts,atomic_load(&owner->_minimumVisiblePTS))&&owner.onFrame) owner.onFrame(image,pts);
             if(image) CVPixelBufferRelease(image);
             dispatch_async(owner->_queue,^{
                 if(owner.generation!=generation) return;

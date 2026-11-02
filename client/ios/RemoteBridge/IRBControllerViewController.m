@@ -10,6 +10,8 @@
     IRBSessionState _state;
     int _fps;
     double _scale;
+    BOOL _inputAllowed;
+    uint64_t _minimumVisiblePTS;
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -27,13 +29,22 @@
     _videoView.onTouch=^(int finger,int phase,double x,double y) {[weak.session command:@{@"op":@"touch",@"finger":@(finger),@"phase":@(phase),@"x":@(x),@"y":@(y)}];};
     _session.onState=^(IRBSessionState state,NSString *message) {
         IRBControllerViewController *owner=weak;if(!owner) return;owner->_state=state;
-        owner->_videoView.controlEnabled=state==IRBSessionStreaming;
+        owner->_videoView.controlEnabled=state==IRBSessionStreaming&&owner->_inputAllowed;
         UIApplication.sharedApplication.idleTimerDisabled=state==IRBSessionStreaming;
         if(state!=IRBSessionStreaming) [owner->_videoView clear];else [owner applyQuality];
         [owner->_interface updateConnectionState:state message:message];
         [owner setNeedsUpdateOfScreenEdgesDeferringSystemGestures];
     };
     _session.onFrame=^(CVPixelBufferRef image,uint64_t pts) {(void)pts;[weak.videoView display:image];};
+    _session.onDeviceState=^(NSDictionary *device) {
+        IRBControllerViewController *owner=weak;if(!owner) return;
+        uint64_t minimum=[device[@"min_visible_pts"] unsignedLongLongValue];
+        if(minimum!=owner->_minimumVisiblePTS) { [owner cancelInput];[owner->_videoView clear]; }
+        owner->_minimumVisiblePTS=minimum;
+        owner->_inputAllowed=device[@"input_allowed"]?[device[@"input_allowed"] boolValue]:YES;
+        owner->_videoView.controlEnabled=owner->_state==IRBSessionStreaming&&owner->_inputAllowed;
+        [owner->_interface updateDeviceLocked:[device[@"locked"] boolValue] screenOff:[device[@"display_on"] isEqual:@NO] inputAllowed:owner->_inputAllowed wakeSupported:[device[@"wake_supported"] boolValue]];
+    };
     _session.onStats=^(NSDictionary *stats) {
         IRBControllerViewController *owner=weak;if(owner) [owner->_interface updateFPS:[stats[@"fps"] doubleValue] rtt:[stats[@"rtt_ms"] doubleValue]];
     };
@@ -60,7 +71,7 @@
 }
 - (void)performOperation:(NSString *)operation {
     if(_state!=IRBSessionStreaming) return;
-    NSSet *operations=[NSSet setWithArray:@[@"press_home",@"app_switcher",@"control_center",@"volume_down",@"volume_up"]];
+    NSSet *operations=[NSSet setWithArray:@[@"wake_screen",@"press_home",@"app_switcher",@"control_center",@"volume_down",@"volume_up"]];
     if(![operations containsObject:operation]) return;
     [self cancelInput];[_session command:@{@"op":operation}];
 }

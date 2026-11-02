@@ -22,9 +22,14 @@ Untrusted network/crypto handling is already outside SpringBoard.
 
 After pinned TLS, the client sends its random 256-bit token and requests viewing
 or control. The daemon forwards the authenticated session to SpringBoard, which
-starts immediately if the phone is unlocked. There are no custom connection or
+starts immediately. Clients negotiating lockscreen viewing may connect while
+locked; other clients require an unlocked phone. There are no custom connection or
 per-action approval dialogs. No floating control button covers the phone screen.
-Lock, expiry, disconnect, respring, timeout or repeated pipeline errors stop it.
+Lock suspends input and native HID, updates an input epoch, and retains negotiated
+viewing. Display-off pauses capture; a dedicated backlight-on operation wakes it
+without unlocking. Display transitions advertise a timestamp barrier and clear
+cached frames. Unlock restores input with the new epoch. Legacy lock, expiry,
+disconnect, respring, timeout or repeated pipeline errors stop the session.
 
 F10 uses an entitled IOHIDUserDevice in the mobile daemon. SpringBoard controls
 AssistiveTouch and validates every native input request before forwarding it over
