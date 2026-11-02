@@ -19,7 +19,7 @@ with zipfile.ZipFile(archive) as output:
     assert 'Payload/iOSRemoteBridge.app/Info.plist' in output.namelist()
     assert 'Payload/iOSRemoteBridge.app/iOSRemoteBridge' in output.namelist()
 shutil.copyfile(root/'docs/IOS_CLIENT.md',folder/'INSTALL.md')
-(folder/'BUILD.txt').write_text('Objective-C + UIKit iOS controller\nSource: '+os.environ.get('GITHUB_SHA','local')+'\nCI: https://github.com/Justintunsday/iOSRemoteBridge/actions/runs/'+os.environ.get('GITHUB_RUN_ID','local')+'\nRequires re-signing through AltStore, Sideloadly or Xcode before ordinary device installation.\n')
+(folder/'BUILD.txt').write_text('SwiftUI frontend + Objective-C transport and decoder\nSource: '+os.environ.get('GITHUB_SHA','local')+'\nCI: https://github.com/Justintunsday/iOSRemoteBridge/actions/runs/'+os.environ.get('GITHUB_RUN_ID','local')+'\nRequires re-signing through AltStore, Sideloadly or Xcode before ordinary device installation.\n')
 with archive.open('rb') as stream: checksum=hashlib.file_digest(stream,'sha256').hexdigest()
 (folder/'SHA256SUMS.txt').write_text(checksum+'  '+archive.name+'\n')
 print(f'IPA packaged: {archive.stat().st_size:,} bytes; archive structure and credential exclusion checks passed')

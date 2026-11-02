@@ -1,6 +1,13 @@
 #import "IRBVideoView.h"
 #import "IRBProtocol.h"
 #import <AVFoundation/AVFoundation.h>
+@interface IRBDisplayTick : NSObject
+@property(nonatomic,copy) void(^callback)(CADisplayLink *);
+- (void)tick:(CADisplayLink *)link;
+@end
+@implementation IRBDisplayTick
+- (void)tick:(CADisplayLink *)link { if(self.callback) self.callback(link); }
+@end
 @implementation IRBVideoView {
     AVSampleBufferDisplayLayer *_display;
     CMVideoFormatDescriptionRef _format;
@@ -11,16 +18,22 @@
     CGPoint _positions[2];
     CFTimeInterval _lastSent[2];
     CADisplayLink *_link;
+    CADisplayLink *_presentationLink;
+    CVPixelBufferRef _pendingImage;
+    NSUInteger _presentedFrameCount,_coalescedFrameCount;
+    CGSize _lastBoundsSize;
 }
 - (instancetype)initWithFrame:(CGRect)frame {
     if((self=[super initWithFrame:frame])) {
         self.backgroundColor=UIColor.blackColor;self.multipleTouchEnabled=YES;self.layer.cornerRadius=16;self.clipsToBounds=YES;
         _display=[AVSampleBufferDisplayLayer new];_display.videoGravity=AVLayerVideoGravityResizeAspect;[self.layer addSublayer:_display];
-        _fingers=[NSMutableDictionary new];self.accessibilityLabel=@"远程 iPhone 画面";
+        _fingers=[NSMutableDictionary new];_vSyncEnabled=YES;self.accessibilityLabel=@"远程 iPhone 画面";
     }return self;
 }
 - (void)layoutSubviews {
-    [super layoutSubviews];CGSize visible=_nativeSize;
+    [super layoutSubviews];
+    if(!CGSizeEqualToSize(_lastBoundsSize,self.bounds.size)) { [self cancelTouches];_lastBoundsSize=self.bounds.size; }
+    CGSize visible=_nativeSize;
     if(_rotation==90||_rotation==270) visible=CGSizeMake(visible.height,visible.width);
     _imageRect=visible.width>0?AVMakeRectWithAspectRatioInsideRect(visible,self.bounds):CGRectZero;
     [CATransaction begin];[CATransaction setDisableActions:YES];
@@ -30,19 +43,56 @@
 }
 - (void)setRotation:(NSInteger)rotation { [self cancelTouches];_rotation=((rotation%360)+360)%360;[self setNeedsLayout]; }
 - (void)setControlEnabled:(BOOL)enabled { if(!enabled) [self cancelTouches];_controlEnabled=enabled; }
+- (NSUInteger)pendingFrameCount { return _pendingImage?1:0; }
+- (NSUInteger)presentedFrameCount { return _presentedFrameCount; }
+- (NSUInteger)coalescedFrameCount { return _coalescedFrameCount; }
+- (void)schedulePresentation {
+    if(!_presentationLink) {
+        IRBDisplayTick *target=[IRBDisplayTick new];__weak IRBVideoView *weak=self;
+        target.callback=^(CADisplayLink *link) {(void)link;[weak presentPendingFrame];};
+        _presentationLink=[CADisplayLink displayLinkWithTarget:target selector:@selector(tick:)];
+        float maximum=(float)MAX(30,(self.window.screen?:UIScreen.mainScreen).maximumFramesPerSecond);
+        _presentationLink.preferredFrameRateRange=CAFrameRateRangeMake(30,maximum,maximum);
+        [_presentationLink addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+    }
+    _presentationLink.paused=NO;
+}
+- (void)setVSyncEnabled:(BOOL)enabled {
+    _vSyncEnabled=enabled;
+    if(!enabled&&_pendingImage) [self presentPendingFrame];
+    if(_pendingImage) [self schedulePresentation];
+}
 - (void)display:(CVPixelBufferRef)image {
     CGSize size=CGSizeMake(CVPixelBufferGetWidth(image),CVPixelBufferGetHeight(image));
     if(!CGSizeEqualToSize(size,_nativeSize)) { _nativeSize=size;if(_format) {CFRelease(_format);_format=NULL;}[self setNeedsLayout];[self layoutIfNeeded]; }
+    // Coalesce decoded images only. The serial decoder still consumes every
+    // encoded reference frame and the network returns all frame credits in order.
+    if(_pendingImage) { CVPixelBufferRelease(_pendingImage);++_coalescedFrameCount; }
+    _pendingImage=CVPixelBufferRetain(image);
+    if(!_vSyncEnabled) [self presentPendingFrame];
+    if(_pendingImage) [self schedulePresentation];
+}
+- (void)presentPendingFrame {
+    if(!_pendingImage) { _presentationLink.paused=YES;return; }
     if(_display.status==AVQueuedSampleBufferRenderingStatusFailed) [_display flush];
+    if(!_display.readyForMoreMediaData) return;
+    CVPixelBufferRef image=_pendingImage;_pendingImage=NULL;
+    [self enqueueImage:image];CVPixelBufferRelease(image);_presentationLink.paused=YES;
+}
+- (void)enqueueImage:(CVPixelBufferRef)image {
     if(!_format&&CMVideoFormatDescriptionCreateForImageBuffer(NULL,image,&_format)) return;
-    if(!_display.readyForMoreMediaData) return; // Drop only decoded pictures, never encoded reference frames.
     CMSampleTimingInfo timing={kCMTimeInvalid,kCMTimeInvalid,kCMTimeInvalid};CMSampleBufferRef sample=NULL;
     if(CMSampleBufferCreateReadyWithImageBuffer(NULL,image,_format,&timing,&sample)) return;
     CFArrayRef attachments=CMSampleBufferGetSampleAttachmentsArray(sample,true);
     if(attachments&&CFArrayGetCount(attachments)) CFDictionarySetValue((CFMutableDictionaryRef)CFArrayGetValueAtIndex(attachments,0),kCMSampleAttachmentKey_DisplayImmediately,kCFBooleanTrue);
-    [_display enqueueSampleBuffer:sample];CFRelease(sample);_hasImage=YES;
+    [_display enqueueSampleBuffer:sample];CFRelease(sample);_hasImage=YES;++_presentedFrameCount;
 }
-- (void)clear { [self cancelTouches];[_display flushAndRemoveImage];_hasImage=NO; }
+- (void)clear {
+    [self cancelTouches];_presentationLink.paused=YES;
+    if(_pendingImage) {CVPixelBufferRelease(_pendingImage);_pendingImage=NULL;}
+    if(_format) {CFRelease(_format);_format=NULL;}
+    [_display flushAndRemoveImage];_hasImage=NO;
+}
 - (BOOL)normalizedPoint:(CGPoint)point clamp:(BOOL)clamp result:(CGPoint *)result {
     if(_imageRect.size.width<=0||_imageRect.size.height<=0||(!clamp&&!CGRectContainsPoint(_imageRect,point))) return NO;
     double x=MIN(1,MAX(0,(point.x-_imageRect.origin.x)/_imageRect.size.width));
@@ -89,5 +139,5 @@
     for(int i=0;i<2;++i) if(_used[i]) { [self send:i phase:2];_used[i]=NO; }
     [_fingers removeAllObjects];[_link invalidate];_link=nil;
 }
-- (void)dealloc { [_link invalidate];if(_format) CFRelease(_format); }
+- (void)dealloc { [_link invalidate];[_presentationLink invalidate];if(_pendingImage) CVPixelBufferRelease(_pendingImage);if(_format) CFRelease(_format); }
 @end

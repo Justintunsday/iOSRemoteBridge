@@ -46,6 +46,11 @@ jobs:
           app_path="$(find build/controller-device -type d -name iOSRemoteBridge.app | head -n 1)"
           test -n "$app_path"
           cp -R "$app_path" dist/ios-controller/Payload/
+          if [ -d dist/ios-controller/Payload/iOSRemoteBridge.app/Frameworks ]; then
+            find dist/ios-controller/Payload/iOSRemoteBridge.app/Frameworks -type f -name '*.dylib' -print0 | while IFS= read -r -d '' library; do
+              codesign --force --sign - --timestamp=none "$library"
+            done
+          fi
           codesign --force --sign - --timestamp=none dist/ios-controller/Payload/iOSRemoteBridge.app
           codesign --verify --deep --strict dist/ios-controller/Payload/iOSRemoteBridge.app
           lipo -info dist/ios-controller/Payload/iOSRemoteBridge.app/iOSRemoteBridge | tee build-logs/controller-architectures.txt

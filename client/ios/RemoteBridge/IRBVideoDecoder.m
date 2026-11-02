@@ -23,7 +23,7 @@ NSArray<NSData *> *IRBSplitAnnexB(NSData *data) {
     NSData *_sps,*_pps;
     BOOL _needKey;
 }
-- (instancetype)init { if((self=[super init])) { _queue=dispatch_queue_create("irb.controller.decode",DISPATCH_QUEUE_SERIAL);_needKey=YES; }return self; }
+- (instancetype)init { if((self=[super init])) { _queue=dispatch_queue_create("irb.controller.decode",dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL,QOS_CLASS_USER_INTERACTIVE,0));_needKey=YES; }return self; }
 - (void)resetSession {
     if(_session) { VTDecompressionSessionInvalidate(_session);CFRelease(_session);_session=NULL; }
     if(_format) { CFRelease(_format);_format=NULL; }

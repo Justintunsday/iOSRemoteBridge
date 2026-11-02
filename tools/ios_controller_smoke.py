@@ -40,8 +40,8 @@ def diagnostics():
             output=sim(*arguments,check=False,timeout=25)
             (LOGS/name).write_text((output.stdout+'\n'+output.stderr)[-200000:])
         except subprocess.TimeoutExpired:(LOGS/name).write_text('Simulator diagnostic command timed out')
-def scenario(wrong_pin):
-    name='wrong-pin' if wrong_pin else 'stream-and-input'
+def scenario(wrong_pin,preview=None):
+    name='wrong-pin' if wrong_pin else 'stream-and-input'+('-'+preview if preview else '')
     print('Starting '+name,flush=True)
     with tempfile.TemporaryDirectory() as temporary:
         pairing=Path(temporary)/'pairing';provision('127.0.0.1',pairing)
@@ -88,7 +88,7 @@ def scenario(wrong_pin):
         result_path=cache/'irb-smoke-result.json'
         if result_path.exists():result_path.unlink()
         (cache/'irb-smoke-profile.json').write_text(json.dumps(config))
-        (cache/'irb-smoke-options.json').write_text(json.dumps({'pin_failure':wrong_pin}))
+        (cache/'irb-smoke-options.json').write_text(json.dumps({'pin_failure':wrong_pin,'ui_preview':preview}))
         sim('launch',SIMULATOR,BUNDLE,'--irb-smoke')
         deadline=time.monotonic()+55
         while not result_path.exists() and time.monotonic()<deadline:time.sleep(.25)
@@ -98,6 +98,7 @@ def scenario(wrong_pin):
             (LOGS/f'controller-{name}-timeout.log').write_text(diagnostics.stdout+'\n'+diagnostics.stderr)
             raise AssertionError(f'{name}: no simulator test result')
         result=json.loads(result_path.read_text());(LOGS/f'controller-{name}.json').write_text(json.dumps(result,indent=2))
+        time.sleep(.5) # Let SwiftUI sheet/fullscreen transitions settle for visual QA.
         sim('io',SIMULATOR,'screenshot',str(LOGS/f'controller-{name}.png'),check=False)
         if result['passed'] and not wrong_pin:all_credits.wait(timeout=5)
         sim('terminate',SIMULATOR,BUNDLE,check=False);listener.close();thread.join(timeout=3)
@@ -112,6 +113,8 @@ def scenario(wrong_pin):
 try:
     warmup()
     scenario(False)
+    scenario(False,'settings')
+    scenario(False,'fullscreen')
     scenario(True)
     print('Actual iOS Simulator TLS, certificate-pin, decoded grayscale, coordinate and control checks passed')
 except Exception:

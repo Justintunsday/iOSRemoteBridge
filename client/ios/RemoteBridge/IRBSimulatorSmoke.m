@@ -1,5 +1,6 @@
 #import "IRBSimulatorSmoke.h"
 #import "IRBControllerViewController.h"
+#import "IRBInterfaceActions.h"
 #import <TargetConditionals.h>
 #if TARGET_OS_SIMULATOR
 static BOOL smokeRequested(void) { return [NSProcessInfo.processInfo.arguments containsObject:@"--irb-smoke"]; }
@@ -26,7 +27,18 @@ void IRBStartSimulatorSmoke(IRBControllerViewController *controller) {
         if(finished) return;finished=YES;result[@"passed"]=ok?@YES:@NO;result[@"reason"]=reason;
         [[NSJSONSerialization dataWithJSONObject:result options:NSJSONWritingPrettyPrinted error:NULL] writeToURL:smokeFile(@"irb-smoke-result.json") atomically:YES];
     };
-    void(^maybeFinish)(void)=^{if([result[@"decoded_frames"] intValue]>=3&&[result[@"responses"] intValue]>=6) finish([result[@"pixels_valid"] boolValue]&&[result[@"coordinates_valid"] boolValue],@"video, color, coordinate mapping and ordered control replies");};
+    void(^maybeFinish)(void)=^{
+        if([result[@"decoded_frames"] intValue]<3||[result[@"responses"] intValue]<6||controller.videoView.presentedFrameCount<2||controller.videoView.pendingFrameCount) return;
+        [controller.view layoutIfNeeded];[controller.videoView layoutIfNeeded];
+        CGPoint natural;CGRect bounds=controller.videoView.bounds;
+        BOOL center=[controller.videoView normalizedPoint:CGPointMake(CGRectGetMidX(bounds),CGRectGetMidY(bounds)) clamp:NO result:&natural]&&fabs(natural.x-.5)<.001&&fabs(natural.y-.5)<.001;
+        BOOL letterbox=![controller.videoView normalizedPoint:CGPointMake(1,1) clamp:NO result:&natural];result[@"coordinates_valid"]=@(center&&letterbox);
+        result[@"presented_frames"]=@(controller.videoView.presentedFrameCount);result[@"coalesced_frames"]=@(controller.videoView.coalescedFrameCount);
+        finish([result[@"pixels_valid"] boolValue]&&center&&letterbox&&[result[@"vsync_bounded"] boolValue]&&[result[@"immediate_mode"] boolValue],@"SwiftUI, VSync clock, bounded latest frame, grayscale and ordered controls");
+    };
+    [NSTimer scheduledTimerWithTimeInterval:.05 repeats:YES block:^(NSTimer *timer) {if(finished) [timer invalidate];else maybeFinish();}];
+    NSString *preview=[options[@"ui_preview"] isKindOfClass:NSString.class]?options[@"ui_preview"]:nil;
+    if(preview.length) dispatch_after(dispatch_time(DISPATCH_TIME_NOW,300*NSEC_PER_MSEC),dispatch_get_main_queue(),^{[controller previewInterface:preview];});
     void(^oldState)(IRBSessionState,NSString *)=controller.session.onState;
     controller.session.onState=^(IRBSessionState state,NSString *message) {
         if(oldState) oldState(state,message);
@@ -47,10 +59,15 @@ void IRBStartSimulatorSmoke(IRBControllerViewController *controller) {
             CVPixelBufferUnlockBaseAddress(image,kCVPixelBufferLock_ReadOnly);
             result[@"width"]=@(width);result[@"height"]=@(height);result[@"black"]=@(black);result[@"white"]=@(white);
             result[@"pixels_valid"]=@(pixelsValid);result[@"luma_levels"]=levels;
-            CGPoint natural;CGRect bounds=controller.videoView.bounds;
-            BOOL center=[controller.videoView normalizedPoint:CGPointMake(CGRectGetMidX(bounds),CGRectGetMidY(bounds)) clamp:NO result:&natural]&&fabs(natural.x-.5)<.001&&fabs(natural.y-.5)<.001;
-            BOOL letterbox=![controller.videoView normalizedPoint:CGPointMake(1,1) clamp:NO result:&natural];result[@"coordinates_valid"]=@(center&&letterbox);
-            for(NSDictionary *request in @[@{@"op":@"touch",@"finger":@0,@"phase":@0,@"x":@.25,@"y":@.75},@{@"op":@"touch",@"finger":@0,@"phase":@1,@"x":@.4,@"y":@.5},@{@"op":@"touch",@"finger":@0,@"phase":@2,@"x":@.4,@"y":@.5},@{@"op":@"press_home"},@{@"op":@"type_text",@"text":@"IRB"}]) [controller.session command:request];
+            NSUInteger before=controller.videoView.presentedFrameCount;
+            [controller.videoView display:image];[controller.videoView display:image];[controller.videoView display:image];
+            result[@"vsync_bounded"]=@(controller.videoView.vSyncEnabled&&controller.videoView.pendingFrameCount==1&&controller.videoView.presentedFrameCount==before&&controller.videoView.coalescedFrameCount>=2);
+            controller.videoView.vSyncEnabled=NO;
+            result[@"immediate_mode"]=@(controller.videoView.pendingFrameCount==0&&controller.videoView.presentedFrameCount==before+1);
+            controller.videoView.vSyncEnabled=YES;[controller.videoView display:image];
+            for(NSDictionary *request in @[@{@"op":@"touch",@"finger":@0,@"phase":@0,@"x":@.25,@"y":@.75},@{@"op":@"touch",@"finger":@0,@"phase":@1,@"x":@.4,@"y":@.5},@{@"op":@"touch",@"finger":@0,@"phase":@2,@"x":@.4,@"y":@.5}]) [controller.session command:request];
+            [(id<IRBInterfaceActions>)controller performOperation:@"press_home"];
+            [(id<IRBInterfaceActions>)controller sendRemoteText:@"IRB"];
         }
         maybeFinish();
     };

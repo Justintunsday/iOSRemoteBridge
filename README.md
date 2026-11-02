@@ -33,9 +33,9 @@ records the relative mouse correction and its physical test results.
   collapsible toolbar, VSync, FSR 1, an optional single-frame FSR 4/3/2.3 experiment,
   navigation shortcuts, captured native iOS relative mouse/keyboard input, reconnect and
   FPS/RTT/decode statistics.
-- Objective-C / UIKit controller for iPhone and iPad (iOS 15+), with native
+- SwiftUI controller with an Objective-C transport/decoder core for iPhone and iPad (iOS 15+), with native
   VideoToolbox decoding, pinned TLS, Keychain pairing, two-finger touch, system
-  navigation, quality settings and a collapsible toolbar. See [IOS_CLIENT](docs/IOS_CLIENT.md)
+  navigation, display-linked VSync, a movable virtual Home button, quality settings and a collapsible toolbar. See [IOS_CLIENT](docs/IOS_CLIENT.md)
   for AltStore / Sideloadly re-signing and installation.
 - Python API/CLI, JSON-lines adapter and optional standard MCP stdio tools.
 - GitHub Actions builds, TLS/H.264 simulator tests, validation, logs/artifacts
@@ -80,7 +80,7 @@ the implementation does not bypass a passcode or disable auto-lock.
 | [SECURITY](docs/SECURITY.md) | Authentication, automatic operation policy and threat-model limits |
 | [PERFORMANCE](docs/PERFORMANCE.md) | Evidence, calculated budgets and measurement procedures |
 | [CLIENT](docs/CLIENT.md) | Windows controls and source builds |
-| [IOS_CLIENT](docs/IOS_CLIENT.md) | Objective-C iPhone/iPad controller, re-signing and pairing |
+| [IOS_CLIENT](docs/IOS_CLIENT.md) | SwiftUI / Objective-C controller, re-signing and pairing |
 | [AUTOMATION](docs/AUTOMATION.md) | API operations, Python and MCP |
 | [IMPLEMENTATION_PLAN](docs/IMPLEMENTATION_PLAN.md) | Milestone ledger and remaining work |
 
