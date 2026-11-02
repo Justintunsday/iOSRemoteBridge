@@ -95,6 +95,7 @@ final class IRBInterfaceHost: NSObject {
     func setSimulatorPreview(_ scene: String) {
         model.showSettings = scene == "settings"
         model.fullscreen = scene == "fullscreen"
+        if scene == "locked" { model.locked = true; model.screenOff = true; model.inputAllowed = false; model.wakeSupported = true }
     }
     #endif
 }

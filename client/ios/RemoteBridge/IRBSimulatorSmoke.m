@@ -21,20 +21,24 @@ void IRBStartSimulatorSmoke(IRBControllerViewController *controller) {
     NSData *optionsData=[NSData dataWithContentsOfURL:smokeFile(@"irb-smoke-options.json")];
     NSDictionary *options=optionsData?[NSJSONSerialization JSONObjectWithData:optionsData options:0 error:NULL]:@{};
     BOOL pinFailure=[options[@"pin_failure"] boolValue];
+    BOOL lockMode=[options[@"ui_preview"] isEqual:@"lockscreen"];
     NSMutableDictionary *result=[@{@"passed":@NO,@"decoded_frames":@0,@"responses":@0,@"pin_failure":@(pinFailure)} mutableCopy];
     __block BOOL finished=NO,sent=NO;
     void(^finish)(BOOL,NSString *)=^(BOOL ok,NSString *reason) {
         if(finished) return;finished=YES;result[@"passed"]=ok?@YES:@NO;result[@"reason"]=reason;
+        if(ok&&lockMode) [controller previewInterface:@"locked"];
         [[NSJSONSerialization dataWithJSONObject:result options:NSJSONWritingPrettyPrinted error:NULL] writeToURL:smokeFile(@"irb-smoke-result.json") atomically:YES];
     };
     void(^maybeFinish)(void)=^{
         if([result[@"decoded_frames"] intValue]<3||[result[@"responses"] intValue]<6||controller.videoView.presentedFrameCount<2||controller.videoView.pendingFrameCount) return;
+        if(lockMode&&([result[@"responses"] intValue]<8||[result[@"decoded_frames"] intValue]<4)) return;
         [controller.view layoutIfNeeded];[controller.videoView layoutIfNeeded];
         CGPoint natural;CGRect bounds=controller.videoView.bounds;
         BOOL center=[controller.videoView normalizedPoint:CGPointMake(CGRectGetMidX(bounds),CGRectGetMidY(bounds)) clamp:NO result:&natural]&&fabs(natural.x-.5)<.001&&fabs(natural.y-.5)<.001;
         BOOL letterbox=![controller.videoView normalizedPoint:CGPointMake(1,1) clamp:NO result:&natural];result[@"coordinates_valid"]=@(center&&letterbox);
         result[@"presented_frames"]=@(controller.videoView.presentedFrameCount);result[@"coalesced_frames"]=@(controller.videoView.coalescedFrameCount);
-        finish([result[@"pixels_valid"] boolValue]&&center&&letterbox&&[result[@"vsync_bounded"] boolValue]&&[result[@"immediate_mode"] boolValue],@"SwiftUI, VSync clock, bounded latest frame, grayscale and ordered controls");
+        BOOL lockOK=!lockMode||([result[@"lock_input_suspended"] boolValue]&&[result[@"unlock_input_restored"] boolValue]&&[result[@"decoded_frames"] intValue]==4);
+        finish(lockOK&&[result[@"pixels_valid"] boolValue]&&center&&letterbox&&[result[@"vsync_bounded"] boolValue]&&[result[@"immediate_mode"] boolValue],@"SwiftUI, VSync, grayscale, ordered controls and lock/wake epoch barriers");
     };
     [NSTimer scheduledTimerWithTimeInterval:.05 repeats:YES block:^(NSTimer *timer) {if(finished) [timer invalidate];else maybeFinish();}];
     NSString *preview=[options[@"ui_preview"] isKindOfClass:NSString.class]?options[@"ui_preview"]:nil;
@@ -43,6 +47,18 @@ void IRBStartSimulatorSmoke(IRBControllerViewController *controller) {
     controller.session.onState=^(IRBSessionState state,NSString *message) {
         if(oldState) oldState(state,message);
         if(state==IRBSessionIdle&&[message containsString:@"证书"]) finish(pinFailure,message);
+    };
+    void(^oldDevice)(NSDictionary *)=controller.session.onDeviceState;
+    controller.session.onDeviceState=^(NSDictionary *device) {
+        if(oldDevice) oldDevice(device);if(!lockMode) return;
+        if([device[@"locked"] boolValue]) {
+            result[@"lock_input_suspended"]=@(!controller.videoView.controlEnabled);
+            [controller.session command:@{@"op":@"press_home"}]; // Must be discarded locally.
+            [(id<IRBInterfaceActions>)controller performOperation:@"wake_screen"];
+        } else if([result[@"lock_input_suspended"] boolValue]) {
+            result[@"unlock_input_restored"]=@(controller.videoView.controlEnabled);
+            [(id<IRBInterfaceActions>)controller performOperation:@"press_home"];
+        }
     };
     void(^oldFrame)(CVPixelBufferRef,uint64_t)=controller.session.onFrame;
     controller.session.onFrame=^(CVPixelBufferRef image,uint64_t pts) {

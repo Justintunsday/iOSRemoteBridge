@@ -61,7 +61,7 @@ def scenario(wrong_pin,preview=None):
                     h=wire.unpack(wire.recv_exact(sock,24));auth=json.loads(wire.recv_exact(sock,h.length))
                     if h.kind!=wire.AUTH or auth.get('token')!=config['token']: raise ValueError('incorrect authentication')
                     observed['auth']=True
-                    if auth.get('video_window')!=3 or auth.get('fps')!=60 or auth.get('control') is not True: raise ValueError('interactive negotiation mismatch')
+                    if auth.get('video_window')!=3 or auth.get('fps')!=60 or auth.get('control') is not True or auth.get('lockscreen_view') is not True: raise ValueError('interactive negotiation mismatch')
                     sequence=0;rx=h.sequence
                     def send(kind,payload,pts=0):
                         nonlocal sequence
@@ -69,7 +69,10 @@ def scenario(wrong_pin,preview=None):
                         packet=wire.Header(kind,1 if kind==wire.VIDEO else 0,len(body),sequence,pts).pack()+body
                         for offset in range(0,len(packet),19): sock.sendall(packet[offset:offset+19])
                     send(wire.RESPONSE,{'event':'authenticated'})
-                    send(wire.RESPONSE,{'event':'authorized','device':{'model':'SYNTHETIC_TEST','width':192,'height':64}})
+                    lock_mode=preview=='lockscreen';locked_sent=False
+                    device={'model':'SYNTHETIC_TEST','width':192,'height':64}
+                    if lock_mode: device.update(lockscreen_view=True,locked=False,display_on=True,input_allowed=True,input_epoch=1,min_visible_pts=0,wake_supported=True)
+                    send(wire.RESPONSE,{'event':'authorized','device':device})
                     for pts in (100,101,102): send(wire.VIDEO,FIXTURE,pts)
                     while True:
                         h=wire.unpack(wire.recv_exact(sock,24));body=wire.recv_exact(sock,h.length);rx+=1
@@ -77,11 +80,19 @@ def scenario(wrong_pin,preview=None):
                         if h.kind==wire.PING:send(wire.PONG,body,h.pts_us)
                         elif h.kind==wire.CREDIT:
                             observed['credits'].append(h.pts_us)
-                            if len(observed['credits'])>=3:all_credits.set()
+                            if len(observed['credits'])>=(6 if lock_mode else 3):all_credits.set()
                         elif h.kind==wire.CONTROL:
                             request=json.loads(body);observed['operations'].append({k:v for k,v in request.items() if k!='text'})
+                            if lock_mode and request['op'] in ('touch','press_home','type_text') and request.get('input_epoch')!=device['input_epoch']: raise ValueError('input not bound to current epoch')
                             send(wire.RESPONSE,{'id':request['id'],'op':request['op'],'ok':True,'result':{'state':'submitted'}})
+                            if lock_mode and request['op']=='wake_screen':
+                                device.update(locked=False,display_on=True,input_allowed=True,input_epoch=3,min_visible_pts=300)
+                                send(wire.RESPONSE,{'event':'device_state','device':device})
+                                send(wire.VIDEO,FIXTURE,250);send(wire.VIDEO,FIXTURE,300)
                         else:raise ValueError('unexpected client frame')
+                        if lock_mode and not locked_sent and len(observed['operations'])==6 and len(observed['credits'])>=3:
+                            locked_sent=True;device.update(locked=True,display_on=False,input_allowed=False,input_epoch=2,min_visible_pts=200)
+                            send(wire.RESPONSE,{'event':'device_state','device':device});send(wire.VIDEO,FIXTURE,150)
             except (ssl.SSLError,EOFError,OSError,ValueError) as error:observed['error']=type(error).__name__
         thread=threading.Thread(target=server,daemon=True);thread.start()
         container=Path(sim('get_app_container',SIMULATOR,BUNDLE,'data').stdout.strip());cache=container/'Library/Caches';cache.mkdir(parents=True,exist_ok=True)
@@ -105,8 +116,8 @@ def scenario(wrong_pin,preview=None):
         assert result['passed'],result
         if wrong_pin:assert not observed['auth'],'credentials were sent before certificate verification'
         else:
-            assert observed['auth'] and observed['credits']==[100,101,102],observed
-            operations=observed['operations'];assert [x['op'] for x in operations]==['configure','touch','touch','touch','press_home','type_text'],observed
+            assert observed['auth'] and observed['credits']==([100,101,102,150,250,300] if preview=='lockscreen' else [100,101,102]),observed
+            operations=observed['operations'];assert [x['op'] for x in operations]==['configure','touch','touch','touch','press_home','type_text']+(['wake_screen','press_home'] if preview=='lockscreen' else []),observed
             assert operations[0]['fps']==60 and operations[0]['scale']==1 and operations[0]['bitrate']==8000000,observed
             assert [x['phase'] for x in operations[1:4]]==[0,1,2],observed
         print(name+': '+json.dumps(result,ensure_ascii=False),flush=True)
@@ -115,6 +126,7 @@ try:
     scenario(False)
     scenario(False,'settings')
     scenario(False,'fullscreen')
+    scenario(False,'lockscreen')
     scenario(True)
     print('Actual iOS Simulator TLS, certificate-pin, decoded grayscale, coordinate and control checks passed')
 except Exception:

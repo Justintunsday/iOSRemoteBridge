@@ -1,6 +1,8 @@
 # First installation and physical verification
 
 Initial physical results are recorded in [the 2026-11-01 report](DEVICE_VALIDATION_2026-11-01.md).
+Negotiated lockscreen viewing and display wake are recorded in
+[the lockscreen report](LOCKSCREEN_VALIDATION_2026-11-02.md).
 Capture/playback passed; Home, App Switcher, tap and swipe passed after fixing
 the initial input failure. For further validation,
 use the owner's iPhone SE 2 (iPhone12,8) on iOS 16.1.1 with Dopamine and ElleKit.
