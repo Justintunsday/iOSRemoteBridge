@@ -15,7 +15,7 @@ static inline BOOL IRBValidateRequest(NSDictionary *r,BOOL internal) {
     dispatch_once(&once,^{ schemas=@{
         @"get_device_info":@[],@"get_screen_frame":@[],@"get_orientation":@[],
         @"get_connection_status":@[],@"get_performance_stats":@[],@"request_keyframe":@[],
-        @"disconnect":@[],@"press_home":@[],@"app_switcher":@[],@"control_center":@[],@"volume_up":@[],@"volume_down":@[],
+        @"disconnect":@[],@"wake_screen":@[],@"press_home":@[],@"app_switcher":@[],@"control_center":@[],@"volume_up":@[],@"volume_down":@[],
         @"keyboard_mode":@[@"enabled"],@"key_event":@[@"usage",@"down"],
         @"mouse_event":@[@"x",@"y",@"buttons",@"wheel"],
         @"mouse_delta":@[@"dx",@"dy",@"buttons",@"wheel"],
@@ -25,7 +25,8 @@ static inline BOOL IRBValidateRequest(NSDictionary *r,BOOL internal) {
         @"key":@[@"usage"],@"launch_app":@[@"bundle_id"],@"configure":@[@"bitrate",@"fps",@"scale"]
     }; });
     NSString *op=r[@"op"]; NSArray *fields=schemas[op]; if(!fields) return NO;
-    for(id key in r) if(![key isEqual:@"id"]&&![key isEqual:@"op"]&&![fields containsObject:key]) return NO;
+    for(id key in r) if(![key isEqual:@"id"]&&![key isEqual:@"op"]&&![key isEqual:@"input_epoch"]&&![fields containsObject:key]) return NO;
+    if(r[@"input_epoch"]&&!IRBFiniteNumber(r[@"input_epoch"],1,2147483647,YES)) return NO;
     for(NSString *key in fields) {
         if([op isEqual:@"configure"]&&([key isEqual:@"fps"]||[key isEqual:@"scale"])) continue;
         if(!r[key]) return NO;

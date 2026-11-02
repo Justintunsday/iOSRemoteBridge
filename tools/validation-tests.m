@@ -5,6 +5,8 @@ static void require(BOOL value) { if(!value) { fprintf(stderr,"command validatio
 int main(void) { @autoreleasepool {
     require(IRBValidateRequest(@{@"op":@"tap",@"id":@1,@"x":@.5,@"y":@.3},NO));
     require(IRBValidateRequest(@{@"op":@"control_center",@"id":@1},NO));
+    require(IRBValidateRequest(@{@"op":@"wake_screen",@"id":@1},NO));
+    require(IRBValidateRequest(@{@"op":@"press_home",@"id":@1,@"input_epoch":@3},NO));
     require(IRBValidateRequest(@{@"op":@"keyboard_mode",@"id":@1,@"enabled":@YES},NO));
     require(IRBValidateRequest(@{@"op":@"key_event",@"id":@1,@"usage":@225,@"down":@NO},NO));
     require(IRBValidateRequest(@{@"op":@"mouse_event",@"id":@1,@"x":@0,@"y":@1,@"buttons":@31,@"wheel":@-127},NO));
@@ -12,6 +14,10 @@ int main(void) { @autoreleasepool {
     require(IRBValidateRequest(@{@"op":@"configure",@"id":@0,@"bitrate":@1000000},YES));
     require(!IRBValidateRequest(@{@"op":@"configure",@"id":@0,@"bitrate":@1000000},NO));
     NSArray *bad=@[
+        @{@"op":@"wake_screen",@"id":@1,@"unlock":@YES},
+        @{@"op":@"press_home",@"id":@1,@"input_epoch":@YES},
+        @{@"op":@"press_home",@"id":@1,@"input_epoch":@0},
+        @{@"op":@"press_home",@"id":@1,@"input_epoch":@1.5},
         @{@"op":@"tap",@"id":@1,@"x":NSNull.null,@"y":@.3},
         @{@"op":@"tap",@"id":@1,@"x":@[],@"y":@.3},
         @{@"op":@"tap",@"id":@1,@"x":@".5",@"y":@.3},

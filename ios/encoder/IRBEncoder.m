@@ -62,6 +62,7 @@ static void encoded(void *ref,void *source,OSStatus status,VTEncodeInfoFlags fla
 - (BOOL)setBitrate:(int)bitrate { return _session&&[self property:kVTCompressionPropertyKey_AverageBitRate value:@(bitrate) required:YES]; }
 - (BOOL)setFPS:(int)fps {
     if(!_session||![self property:kVTCompressionPropertyKey_ExpectedFrameRate value:@(fps) required:YES]) return NO;
+    [self property:kVTCompressionPropertyKey_MaxKeyFrameInterval value:@(fps*2) required:NO];
     _fps=fps; return YES;
 }
 - (void)sample:(CMSampleBufferRef)sb status:(OSStatus)status start:(uint64_t)start {

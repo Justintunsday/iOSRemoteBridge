@@ -13,8 +13,11 @@
 #import "../capture/IRBCapture.h"
 #import "../encoder/IRBEncoder.h"
 #import "../input/IRBInput.h"
+#import "../input/IRBScreenState.h"
 #import <dlfcn.h>
+#import <notify.h>
 #include "../../shared/irb_frame_window.h"
+#include "../../shared/irb_lock_policy.h"
 
 @interface IRBBridge : NSObject
 - (void)start;
@@ -41,6 +44,11 @@
     int _fps,_bitrate,_failures,_slow;
     dispatch_source_t _gesture;
     NSDictionary *_pendingConfiguration;
+    NSDictionary *_gestureRequest;
+    BOOL _lockscreenView,_lastLocked,_lastScreenOn,_lastScreenKnown;
+    uint32_t _inputEpoch;
+    uint64_t _minimumVisiblePTS,_privacyEpoch,_lastWake,_resumedAt;
+    int _lockNotify,_displayNotify;
 }
 - (void)status:(NSString *)state extra:(NSDictionary *)extra {
     NSMutableDictionary *result=[@{@"state":state,@"updated":@([NSDate.date timeIntervalSince1970]),
@@ -51,19 +59,46 @@
     [NSFileManager.defaultManager setAttributes:@{NSFilePosixPermissions:@0600} ofItemAtPath:path error:NULL];
 }
 - (BOOL)locked {
-    Class cls=NSClassFromString(@"SBLockScreenManager");
-    SEL shared=NSSelectorFromString(@"sharedInstance"), locked=NSSelectorFromString(@"isUILocked");
-    if(![cls respondsToSelector:shared]) return YES;
-    id manager=((id(*)(id,SEL))objc_msgSend)(cls,shared);
-    if(![manager respondsToSelector:locked]) return YES;
-    return ((BOOL(*)(id,SEL))objc_msgSend)(manager,locked);
+    return [IRBScreenState locked];
+}
+- (void)cancelActiveInput:(NSString *)reason {
+    NSDictionary *gesture=_gestureRequest;_gestureRequest=nil;
+    if(_gesture) { dispatch_source_cancel(_gesture);_gesture=nil; }
+    [_input releaseAll];_keyboardEnabled=NO;[self restoreSystemPointer];
+    for(NSDictionary *request in _nativeRequests.allValues) [self reply:request result:nil error:reason];
+    [_nativeRequests removeAllObjects];
+    if(gesture) [self reply:gesture result:nil error:reason];
+}
+- (void)refreshDeviceState:(BOOL)force {
+    if(!_approved) return;
+    BOOL locked=[self locked],known=[IRBScreenState screenKnown],on=[IRBScreenState screenOn];
+    if(!_lockscreenView&&locked) { [self stopSession:@"locked or session expired"];return; }
+    BOOL lockChanged=locked!=_lastLocked;
+    BOOL displayChanged=known!=_lastScreenKnown||on!=_lastScreenOn;
+    if(!force&&!lockChanged&&!displayChanged) return;
+    if(lockChanged) {
+        ++_inputEpoch;
+        if(locked) [self cancelActiveInput:@"phone locked; input suspended"];
+    }
+    if(lockChanged||displayChanged) {
+        ++_privacyEpoch;_minimumVisiblePTS=IRBNow();_forceKey=YES;
+        if(_lastFrame) {CVPixelBufferRelease(_lastFrame);_lastFrame=NULL;}
+        if(on) _resumedAt=IRBNow();
+    }
+    _lastLocked=locked;_lastScreenKnown=known;_lastScreenOn=on;
+    [self send:@{@"event":@"device_state",@"device":[self info]}];
+    [self status:locked?@"locked_viewing":@"streaming" extra:[self info]];
 }
 - (void)start {
     _input=[IRBInput new];
     [self status:@"loaded" extra:@{@"input_status":_input.status}];
-    [NSTimer scheduledTimerWithTimeInterval:3 repeats:YES block:^(NSTimer *timer) {
+    __weak IRBBridge *weak=self;_lockNotify=_displayNotify=-1;
+    notify_register_dispatch("com.apple.springboard.lockstate",&_lockNotify,dispatch_get_main_queue(),^(int token) {(void)token;[weak refreshDeviceState:NO];});
+    notify_register_dispatch("com.apple.iokit.hid.displayStatus",&_displayNotify,dispatch_get_main_queue(),^(int token) {(void)token;[weak refreshDeviceState:NO];});
+    [NSTimer scheduledTimerWithTimeInterval:1 repeats:YES block:^(NSTimer *timer) {
         (void)timer; [self connect];
-        if(self->_approved&&([self locked]||IRBNow()>self->_deadline)) [self stopSession:@"locked or session expired"];
+        if(self->_approved&&IRBNow()>self->_deadline) [self stopSession:@"session expired"];
+        else [self refreshDeviceState:NO];
     }];
     [self connect];
 }
@@ -131,7 +166,7 @@
     _approved=NO; _keyboardEnabled=NO; ++_generation;
     [_nativeRequests removeAllObjects]; [self restoreSystemPointer];
     [_display invalidate]; _display=nil;
-    if(_gesture) { dispatch_source_cancel(_gesture); _gesture=nil; }
+    if(_gesture) { dispatch_source_cancel(_gesture); _gesture=nil; }_gestureRequest=nil;
     [_input releaseAll]; [_encoder stop]; _encoder=nil; _capture=nil;
     if(_lastFrame) { CVPixelBufferRelease(_lastFrame); _lastFrame=NULL; }
     [_encodingPTS removeAllObjects]; irb_window_init(&_videoWindow,1);
@@ -168,7 +203,9 @@
     _started=IRBNow(); _frames=0; _skipped=0;
     UIDevice.currentDevice.batteryMonitoringEnabled=YES;
     _display=[CADisplayLink displayLinkWithTarget:self selector:@selector(tick:)];
-    _display.preferredFramesPerSecond=_fps;
+    int pacing=irb_capture_rate(_fps,[self locked],[IRBScreenState screenKnown],[IRBScreenState screenOn]);
+    _display.preferredFramesPerSecond=pacing?pacing:5;
+    if(pacing&&pacing!=_fps) [_encoder setFPS:pacing];
     [_display addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
     [self status:@"streaming" extra:[self info]];
     return YES;
@@ -176,15 +213,18 @@
 - (void)tick:(CADisplayLink *)link {
     (void)link;
     if(!_approved) return;
-    if([self locked]||IRBNow()>_deadline) { [self stopSession:@"locked or session expired"]; return; }
+    if(IRBNow()>_deadline) { [self stopSession:@"session expired"];return; }
+    [self refreshDeviceState:NO];if(!_approved) return;
     NSProcessInfo *process=NSProcessInfo.processInfo;
     if(process.thermalState==NSProcessInfoThermalStateCritical) { [self stopSession:@"critical thermal pressure"]; return; }
     int effective=(process.thermalState>=NSProcessInfoThermalStateSerious||process.lowPowerModeEnabled)?MIN(_fps,30):_fps;
+    effective=irb_capture_rate(effective,[self locked],[IRBScreenState screenKnown],[IRBScreenState screenOn]);
+    if(!effective) return; // Keep TLS/heartbeats alive without capturing a sleeping display.
     if(_display.preferredFramesPerSecond!=effective) {
         if(![_encoder setFPS:effective]) { [self stopSession:@"frame-rate update failed"]; return; }
         _display.preferredFramesPerSecond=effective;
     }
-    for(NSNumber *pts in _encodingPTS) if(IRBNow()-pts.unsignedLongLongValue>2000000) {
+    for(NSNumber *pts in _encodingPTS) if(IRBNow()-MAX(pts.unsignedLongLongValue,_resumedAt)>2000000) {
         [self stopSession:@"encoder callback timed out"]; return;
     }
     if(!irb_window_available(&_videoWindow)||_encodingPTS.count>=MIN(_videoWindow.limit,2u)||_pendingConfiguration) { ++_skipped; return; }
@@ -205,6 +245,11 @@
     return @{@"model":[NSString stringWithUTF8String:u.machine],@"ios":UIDevice.currentDevice.systemVersion,
         @"width":@(_capture.width),@"height":@(_capture.height),@"fps_requested":@(_fps),
         @"video_window":@(_videoWindow.limit),
+        @"lockscreen_view":IRBBool(_lockscreenView),@"locked":IRBBool([self locked]),
+        @"display_on":[IRBScreenState screenKnown]?IRBBool([IRBScreenState screenOn]):[NSNull null],
+        @"input_allowed":IRBBool(_approved&&_control&&![self locked]),
+        @"input_epoch":@(_inputEpoch),@"min_visible_pts":@(_minimumVisiblePTS),
+        @"wake_supported":IRBBool(_lockscreenView&&_control&&[IRBScreenState wakeAvailable]),
         @"control":@(_control),@"keyboard_enabled":IRBBool(_keyboardEnabled),@"keyboard_backend":@"IOHIDUserDevice",@"approval_policy":@"paired_client_automatic",@"orientation":@"natural_portrait",@"input_status":_input.status,
         @"input_diagnostics":_input.diagnostics,
         @"hardware_encoder":_encoder.hardwareStatus?:@"unknown",@"low_latency_mode":@(_encoder.lowLatency),
@@ -234,22 +279,26 @@
     }
     if(h.type==IRB_START) {
         if(_approved) return;
-        if([self locked]) {
+        NSDictionary *options=IRBDictionary(data);
+        _lockscreenView=[IRBNumber(options[@"lockscreen_view"]) boolValue];
+        if([self locked]&&!_lockscreenView) {
             [_peer send:IRB_STOP flags:0 pts:0 data:IRBJSON(@{@"reason":@"unlock the iPhone before connecting"})]; return;
         }
-        NSDictionary *options=IRBDictionary(data);
         _fps=[IRBNumber(options[@"fps"]) intValue]==60?60:30;
         unsigned requested=[IRBNumber(options[@"video_window"]) unsignedIntValue];
         _windowLimit=requested>=1&&requested<=IRB_MAX_VIDEO_WINDOW?requested:1;
         _session=[IRBNumber(options[@"session"]) unsignedLongLongValue];
         _bitrate=8000000; _scale=1; _control=[IRBNumber(options[@"control"]) boolValue];
         ++_generation; _approved=YES; _deadline=IRBNow()+900000000ULL;
+        _inputEpoch=1;_privacyEpoch=1;_minimumVisiblePTS=_lockscreenView?IRBNow():0;_lastWake=0;_resumedAt=IRBNow();
+        _lastLocked=[self locked];_lastScreenKnown=[IRBScreenState screenKnown];_lastScreenOn=[IRBScreenState screenOn];
         if(![self startPipeline]) { [self stopSession:@"pipeline failed"]; return; }
         [self status:@"paired_session_started" extra:@{@"control":IRBBool(_control),@"approval_policy":@"paired_client_automatic"}];
         [self send:@{@"event":@"authorized",@"device":[self info]}];
         return;
     }
     if(h.type!=IRB_CONTROL||!_approved) return;
+    [self refreshDeviceState:NO];if(!_approved) return;
     NSDictionary *r=IRBDictionary(data); NSString *op=r[@"op"];
     if(![op isKindOfClass:NSString.class]||![r[@"id"] isKindOfClass:NSNumber.class]) return;
     if(!IRBValidateRequest(r,YES)) { [self reply:r result:nil error:@"invalid operation arguments"]; return; }
@@ -276,6 +325,13 @@
     if([op isEqual:@"get_screen_frame"]) {
         [self snapshot:r]; return;
     }
+    if([op isEqual:@"wake_screen"]) {
+        if(!_lockscreenView||!_control) { [self reply:r result:nil error:@"screen wake requires a control session with lockscreen viewing"];return; }
+        BOOL ok=IRBNow()-_lastWake<500000;
+        if(!ok) {ok=[IRBScreenState wake];if(ok) _lastWake=IRBNow();}
+        _forceKey=YES;[self refreshDeviceState:YES];
+        [self reply:r result:@{@"state":@"submitted",@"device":[self info]} error:ok?nil:@"screen wake API unavailable on this iOS version"];return;
+    }
     if([op isEqual:@"configure"]) {
         int rate=[IRBNumber(r[@"bitrate"]) intValue];
         if(rate<500000||rate>20000000) { [self reply:r result:nil error:@"bitrate must be 500000..20000000"]; return; }
@@ -292,7 +348,8 @@
     if([op isEqual:@"keyboard_mode"]&&![r[@"enabled"] boolValue]) {
         _keyboardEnabled=NO; [_input releaseKeys]; [self nativeRequest:r]; return;
     }
-    if(!_control||[self locked]) { [self reply:r result:nil error:@"input disabled or phone locked"]; return; }
+    BOOL currentEpoch=[IRBNumber(r[@"input_epoch"]) unsignedIntValue]==_inputEpoch;
+    if(!irb_input_permitted(_control,[self locked],_lockscreenView,currentEpoch)) { [self reply:r result:nil error:@"input disabled, phone locked, or stale input state"]; return; }
     if([op isEqual:@"key_event"]||[op isEqual:@"mouse_event"]||[op isEqual:@"mouse_delta"]) {
         if(!_keyboardEnabled) { [self reply:r result:nil error:@"enable System mouse+keyboard (F10) first"]; return; }
         [self nativeRequest:r]; return;
@@ -356,6 +413,7 @@
     CVPixelBufferRef buffer=CVPixelBufferRetain(_lastFrame);
     int width=(int)CVPixelBufferGetWidth(buffer),height=(int)CVPixelBufferGetHeight(buffer);
     uint64_t generation=_generation;
+    uint64_t privacy=_privacyEpoch;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{ @autoreleasepool {
         CIImage *image=[CIImage imageWithCVPixelBuffer:buffer];
         CGImageRef cg=[context createCGImage:image fromRect:image.extent];
@@ -366,6 +424,8 @@
         dispatch_async(dispatch_get_main_queue(),^{
             if(generation!=self->_generation||!self->_approved) return;
             self->_snapshotPending=NO;
+            [self refreshDeviceState:NO];
+            if(privacy!=self->_privacyEpoch) { [self reply:r result:nil error:@"screen state changed; request a new snapshot"];return; }
             if(!encoded) { [self reply:r result:nil error:@"JPEG unavailable or exceeds response limit"]; return; }
             [self reply:r result:@{@"mime":@"image/jpeg",@"base64":encoded,@"width":@(width),
                  @"height":@(height),@"orientation":@"natural_portrait"} error:nil];
@@ -379,12 +439,15 @@
     }
     if(!text.length) { [self reply:r result:@{} error:nil]; return; }
     __block NSUInteger index=0;
+    _gestureRequest=r;uint32_t epoch=_inputEpoch;
     _gesture=dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,0,0,dispatch_get_main_queue());
     dispatch_source_set_timer(_gesture,DISPATCH_TIME_NOW,10*NSEC_PER_MSEC,NSEC_PER_MSEC);
     dispatch_source_set_event_handler(_gesture,^{
+        if(self->_gestureRequest!=r) return;
+        if([self locked]||epoch!=self->_inputEpoch) { [self cancelActiveInput:@"phone locked; text cancelled"];return; }
         BOOL ok=[self->_input typeASCII:[text substringWithRange:NSMakeRange(index++,1)]];
         if(!ok||index>=text.length) {
-            dispatch_source_cancel(self->_gesture); self->_gesture=nil;
+            dispatch_source_cancel(self->_gesture); self->_gesture=nil;self->_gestureRequest=nil;
             if(!ok) [self->_input releaseAll];
             [self reply:r result:@{@"state":@"completed",@"delivery_verified":@NO} error:ok?nil:@"HID text injection failed"];
         }
@@ -403,16 +466,19 @@
         [self reply:r result:nil error:@"invalid gesture or HID not ready"]; return;
     }
     uint64_t start=IRBNow(); __block BOOL lifted=NO,second=NO;
+    _gestureRequest=r;uint32_t epoch=_inputEpoch;
     _gesture=dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,0,0,dispatch_get_main_queue());
     dispatch_source_set_timer(_gesture,dispatch_time(DISPATCH_TIME_NOW,16*NSEC_PER_MSEC),16*NSEC_PER_MSEC,NSEC_PER_MSEC);
     dispatch_source_set_event_handler(_gesture,^{
+        if(self->_gestureRequest!=r) return;
+        if([self locked]||epoch!=self->_inputEpoch) { [self cancelActiveInput:@"phone locked; gesture cancelled"];return; }
         double t=(IRBNow()-start)/1000000.;
         if(swipe&&t<duration) [self->_input touch:0 phase:1 x:x+(x2-x)*t/duration y:y+(y2-y)*t/duration];
         if(t>=duration&&!lifted) { [self->_input touch:0 phase:2 x:x2 y:y2]; lifted=YES; }
         if(twice&&t>=.16&&!second) { [self->_input touch:0 phase:0 x:x y:y]; second=YES; }
         if(twice&&t>=.22) [self->_input touch:0 phase:2 x:x y:y];
         if(t>=(twice?.22:duration)) {
-            dispatch_source_cancel(self->_gesture); self->_gesture=nil;
+            dispatch_source_cancel(self->_gesture); self->_gesture=nil;self->_gestureRequest=nil;
             [self reply:r result:@{@"state":@"completed",@"delivery_verified":@NO} error:nil];
         }
     }); dispatch_resume(_gesture);
