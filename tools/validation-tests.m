@@ -5,6 +5,15 @@ static void require(BOOL value) { if(!value) { fprintf(stderr,"command validatio
 int main(void) { @autoreleasepool {
     require(IRBValidateRequest(@{@"op":@"tap",@"id":@1,@"x":@.5,@"y":@.3},NO));
     require(IRBValidateRequest(@{@"op":@"control_center",@"id":@1},NO));
+    require(IRBValidateRequest(@{@"op":@"insert_text",@"id":@1,@"text":@"AI 直接输入\n你好 😀 👩🏽‍💻 café"},NO));
+    require(IRBValidateRequest(@{@"op":@"insert_text",@"id":@1,@"text":@""},NO));
+    NSString *boundary=[@"😀" stringByPaddingToLength:1024 withString:@"😀" startingAtIndex:0];
+    require(IRBValidateRequest(@{@"op":@"insert_text",@"id":@1,@"text":boundary},NO));
+    require(!IRBValidateRequest(@{@"op":@"insert_text",@"id":@1,@"text":[boundary stringByAppendingString:@"x"]},NO));
+    unichar unpaired[]={0xd800};
+    require(!IRBValidLiteralText([NSString stringWithCharacters:unpaired length:1]));
+    unpaired[0]=0xdc00;
+    require(!IRBValidLiteralText([NSString stringWithCharacters:unpaired length:1]));
     require(IRBValidateRequest(@{@"op":@"keyboard_mode",@"id":@1,@"enabled":@YES},NO));
     require(IRBValidateRequest(@{@"op":@"key_event",@"id":@1,@"usage":@225,@"down":@NO},NO));
     require(IRBValidateRequest(@{@"op":@"mouse_event",@"id":@1,@"x":@0,@"y":@1,@"buttons":@31,@"wheel":@-127},NO));
@@ -19,6 +28,9 @@ int main(void) { @autoreleasepool {
         @{@"op":@"touch",@"id":@1,@"x":@.5,@"y":@.3,@"finger":@.1,@"phase":@0},
         @{@"op":@"touch",@"id":@1,@"x":@.5,@"y":@.3,@"finger":@10,@"phase":@0},
         @{@"op":@"type_text",@"id":@1,@"text":@{}},
+        @{@"op":@"insert_text",@"id":@1,@"text":@{}},
+        @{@"op":@"insert_text",@"id":@1},
+        @{@"op":@"insert_text",@"id":@1,@"text":@"ok",@"usage":@40},
         @{@"op":@"get_device_info",@"id":@YES},
         @{@"op":@"get_device_info",@"id":@1,@"extra":@"unknown"},
         @{@"op":@"configure",@"id":@1,@"bitrate":@1000000,@"fps":@60},

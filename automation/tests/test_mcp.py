@@ -67,6 +67,17 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(result.is_error)
             self.assertEqual(result.content[0].type, "image")
             self.assertEqual(result.content[0].mime_type, "image/jpeg")
+            text = "AI 直接输入\n你好 😀 café 👩🏽‍💻"
+            result = await client.call_tool("insert_text", {"text": text})
+            self.assertFalse(result.is_error)
+            self.assertEqual(calls[-1], ("insert_text", {"text": text}))
+            result = await client.call_tool("insert_text", {"text": "😀" * 512})
+            self.assertFalse(result.is_error)
+            count = len(calls)
+            for invalid in ("😀" * 513, "\ud800", "\udc00"):
+                result = await client.call_tool("insert_text", {"text": invalid})
+                self.assertTrue(result.is_error)
+                self.assertEqual(len(calls), count)
         adapter.close()
 
 if __name__ == "__main__": unittest.main()

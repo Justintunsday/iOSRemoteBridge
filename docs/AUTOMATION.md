@@ -34,7 +34,8 @@ AUTH field and retains its one-frame behavior. Credits remain ordered per frame.
 | long_press | x, y, duration_ms (40..5000) |
 | swipe | x, y, to_x, to_y, duration_ms (40..5000) |
 | touch | finger (0..9), phase (0 down / 1 move / 2 up), x, y |
-| type_text | text, maximum 1024 US-layout ASCII characters; executes directly in a control session |
+| insert_text | literal Unicode text, maximum 1024 UTF-16 code units; inserts into the focused field without IME composition or Return; preferred for AI text input |
+| type_text | legacy US-layout ASCII scancodes, maximum 1024 characters; affected by the active IME; use insert_text for literal input |
 | key | usage (USB keyboard page 0x07, 4..231); one press/release; executes directly in a control session |
 | keyboard_mode | enabled (JSON boolean); enables native iOS HID mouse/keyboard and AssistiveTouch without a prompt; disabling releases/removes the device |
 | key_event | usage (4..231), down (JSON boolean); needs keyboard_mode enabled, never replays on reconnect |
@@ -51,6 +52,17 @@ The default Python connection requests viewing only; pass control=True or
 service intentionally permits one session at a time, so the GUI and a separate
 automation process cannot control it concurrently. Use one persistent adapter
 for a sequence of agent actions rather than reconnecting for each tool call.
+
+`insert_text` uses one `IOHIDEventCreateUnicodeEvent` UTF-16LE payload through
+the existing HID client. It requires a focused editable field, an unlocked
+phone and a paired control session, but not `keyboard_mode` or an observed
+touch sender. It does not use the clipboard, change the input language or
+submit the form. A newline is literal text; single-line controls may handle
+it differently. The older `type_text` operation retains physical-key semantics.
+Check `input_diagnostics.literal_text_ready` before insertion. Older installed
+plugins reject the new operation; do not silently substitute scancodes or
+replay text after a timeout. Secure fields and custom editors need separate
+verification. Submission acknowledges dispatch only; observe the field after it.
 
 CLI examples:
 

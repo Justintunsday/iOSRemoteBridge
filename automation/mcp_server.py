@@ -99,8 +99,19 @@ def create_server(adapter):
         return await request("swipe", x=x, y=y, to_x=to_x, to_y=to_y, duration_ms=duration_ms)
 
     @server.tool(annotations=INPUT)
+    async def insert_text(text: Annotated[str, Field(max_length=1024)]) -> dict:
+        """Insert literal Unicode into the observed focused field, bypassing IME composition. Prefer this for Chinese, emoji and ordinary text. Maximum 1024 UTF-16 units. Does not press Return or enable keyboard mode; never retry an ambiguous result."""
+        try:
+            units = len(text.encode("utf-16-le")) // 2
+        except UnicodeError as exc:
+            raise ToolError("text must contain valid Unicode") from exc
+        if units > 1024:
+            raise ToolError("text exceeds 1024 UTF-16 code units")
+        return await request("insert_text", text=text)
+
+    @server.tool(annotations=INPUT)
     async def type_text(text: Annotated[str, Field(max_length=1024)]) -> dict:
-        """Type supported US-layout ASCII text. Executes directly in the paired control session."""
+        """Legacy US-layout ASCII key simulation; affected by the active IME. Prefer insert_text for literal text. Executes in the paired control session."""
         return await request("type_text", text=text)
 
     @server.tool(annotations=INPUT)

@@ -2,6 +2,7 @@
 #import <CoreGraphics/CoreGraphics.h>
 @interface IRBInput : NSObject
 @property(nonatomic,readonly) BOOL ready;
+@property(nonatomic,readonly) BOOL literalTextReady;
 @property(nonatomic,readonly) NSString *status;
 @property(nonatomic,readonly) NSDictionary *diagnostics;
 - (BOOL)touch:(int)finger phase:(int)phase x:(double)x y:(double)y;
@@ -12,5 +13,6 @@
 - (void)releaseKeys;
 - (BOOL)typeASCII:(NSString *)text;
 - (BOOL)supportsText:(NSString *)text;
+- (BOOL)insertText:(NSString *)text;
 - (void)releaseAll;
 @end

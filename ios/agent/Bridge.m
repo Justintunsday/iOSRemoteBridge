@@ -60,7 +60,7 @@
 }
 - (void)start {
     _input=[IRBInput new];
-    [self status:@"loaded" extra:@{@"input_status":_input.status}];
+    [self status:@"loaded" extra:@{@"input_status":_input.status,@"input_diagnostics":_input.diagnostics}];
     [NSTimer scheduledTimerWithTimeInterval:3 repeats:YES block:^(NSTimer *timer) {
         (void)timer; [self connect];
         if(self->_approved&&([self locked]||IRBNow()>self->_deadline)) [self stopSession:@"locked or session expired"];
@@ -318,6 +318,16 @@
         [self gesture:r]; return;
     } else if([op isEqual:@"type_text"]) {
         [self typeText:r]; return;
+    } else if([op isEqual:@"insert_text"]) {
+        NSString *text=r[@"text"];
+        if(!IRBValidLiteralText(text)) {
+            [self reply:r result:nil error:@"insert_text requires valid Unicode (maximum 1024 UTF-16 code units)"]; return;
+        }
+        ok=[_input insertText:text];
+        [self reply:r result:@{@"state":text.length?@"submitted":@"no_op",@"backend":@"IOHIDUnicode/UTF16LE",
+            @"utf16_units":@(text.length),@"delivery_verified":@NO}
+            error:ok?nil:@"literal Unicode input unavailable; no keyboard fallback was attempted"];
+        return;
     } else if([op isEqual:@"key"]) {
         NSNumber *usage=IRBNumber(r[@"usage"]);
         if(usage&&usage.doubleValue==usage.intValue&&usage.intValue>=4&&usage.intValue<=231)

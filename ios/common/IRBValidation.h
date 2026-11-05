@@ -1,4 +1,5 @@
 #import "IRBCommon.h"
+#import "IRBText.h"
 #import <CoreFoundation/CoreFoundation.h>
 static inline BOOL IRBFiniteNumber(id value,double minimum,double maximum,BOOL integer) {
     if(!IRBNumber(value)||CFGetTypeID((__bridge CFTypeRef)value)==CFBooleanGetTypeID()) return NO;
@@ -21,7 +22,7 @@ static inline BOOL IRBValidateRequest(NSDictionary *r,BOOL internal) {
         @"mouse_delta":@[@"dx",@"dy",@"buttons",@"wheel"],
         @"tap":@[@"x",@"y"],@"double_tap":@[@"x",@"y"],@"long_press":@[@"x",@"y",@"duration_ms"],
         @"swipe":@[@"x",@"y",@"to_x",@"to_y",@"duration_ms"],
-        @"touch":@[@"x",@"y",@"finger",@"phase"],@"type_text":@[@"text"],
+        @"touch":@[@"x",@"y",@"finger",@"phase"],@"type_text":@[@"text"],@"insert_text":@[@"text"],
         @"key":@[@"usage"],@"launch_app":@[@"bundle_id"],@"configure":@[@"bitrate",@"fps",@"scale"]
     }; });
     NSString *op=r[@"op"]; NSArray *fields=schemas[op]; if(!fields) return NO;
@@ -46,6 +47,7 @@ static inline BOOL IRBValidateRequest(NSDictionary *r,BOOL internal) {
            !IRBFiniteNumber(r[@"scale"],.25,1,NO)) return NO;
     }
     if(r[@"text"]&&(![r[@"text"] isKindOfClass:NSString.class]||[r[@"text"] length]>1024)) return NO;
+    if([op isEqual:@"insert_text"]&&!IRBValidLiteralText(r[@"text"])) return NO;
     if(r[@"bundle_id"]&&(![r[@"bundle_id"] isKindOfClass:NSString.class]||[r[@"bundle_id"] length]<1||[r[@"bundle_id"] length]>255)) return NO;
     return YES;
 }

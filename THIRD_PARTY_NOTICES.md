@@ -1,5 +1,11 @@
 # Third-party software and research
 
+The Unicode-event C ABI was cross-checked against witchan/ios-mcp's
+`IOHIDPrivate.h` and `TextInputManager.m` (MIT, Copyright 2026 witchan).
+The new literal insertion wrapper is independently implemented and tested;
+no hard-coded sender ID or ambiguous fallback from that project is used.
+Its license is retained as `ios-mcp-MIT.txt` in the license/document bundle.
+
 Original iOSRemoteBridge code is MIT; see LICENSE. The capture, IOHID and
 VideoToolbox implementation was informed by e1abrador/ScreenMirror at
 `d8b801e9805e9946a96af57c8a99d65831d76854`. Its MIT notice is retained in

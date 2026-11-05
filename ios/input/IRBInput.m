@@ -2,6 +2,7 @@
 // No ZXTouch GPL implementation is incorporated. See THIRD_PARTY_NOTICES.md.
 #import "IRBInput.h"
 #import "../common/IRBCommon.h"
+#import "../common/IRBText.h"
 #import <dlfcn.h>
 #import <mach/mach_time.h>
 #import <UIKit/UIKit.h>
@@ -17,6 +18,8 @@ typedef Event (*Digitizer)(CFAllocatorRef,uint64_t,uint32_t,uint32_t,uint32_t,ui
 typedef Event (*Finger)(CFAllocatorRef,uint64_t,uint32_t,uint32_t,uint32_t,HIDFloat,HIDFloat,HIDFloat,
                        HIDFloat,HIDFloat,Boolean,Boolean,uint32_t);
 typedef Event (*Keyboard)(CFAllocatorRef,uint64_t,uint32_t,uint32_t,Boolean,uint32_t);
+// Unicode C ABI cross-checked with witchan/ios-mcp (MIT); see notices.
+typedef Event (*Unicode)(CFAllocatorRef,uint64_t,const uint8_t *,uint32_t,uint32_t,uint32_t);
 typedef void (*SetInt)(Event,uint32_t,CFIndex);
 typedef void (*SetFloat)(Event,uint32_t,HIDFloat);
 typedef void (*SetSender)(Event,uint64_t);
@@ -30,11 +33,11 @@ typedef void (*Register)(Client,EventCallback,void *,void *);
 @end
 @implementation IRBInput {
     Client _client,_monitor;
-    Dispatch _dispatch; Digitizer _digitizer; Finger _finger; Keyboard _keyboard;
+    Dispatch _dispatch; Digitizer _digitizer; Finger _finger; Keyboard _keyboard; Unicode _unicode;
     SetInt _setInt; SetSender _setSender; GetSender _getSender; GetType _getType; Append _append;
     SetFloat _setFloat;
     uint64_t _sender;
-    uint64_t _touchReports,_keyReports;
+    uint64_t _touchReports,_keyReports,_textReports;
     BOOL _down[10],_keys[256]; CGPoint _positions[10];
 }
 static void observed(void *target,void *ref,void *service,Event event) {
@@ -51,6 +54,7 @@ static void observed(void *target,void *ref,void *service,Event event) {
         _digitizer=RESOLVE(Digitizer,"IOHIDEventCreateDigitizerEvent");
         _finger=RESOLVE(Finger,"IOHIDEventCreateDigitizerFingerEvent");
         _keyboard=RESOLVE(Keyboard,"IOHIDEventCreateKeyboardEvent");
+        _unicode=RESOLVE(Unicode,"IOHIDEventCreateUnicodeEvent");
         _append=RESOLVE(Append,"IOHIDEventAppendEvent");
         _setInt=RESOLVE(SetInt,"IOHIDEventSetIntegerValue");
         _setFloat=RESOLVE(SetFloat,"IOHIDEventSetFloatValue");
@@ -71,11 +75,14 @@ static void observed(void *target,void *ref,void *service,Event event) {
     if(!_sender&&_getType(e)==11) _sender=_getSender(e); // kIOHIDEventTypeDigitizer
 }
 - (BOOL)ready { return _client&&_dispatch&&_digitizer&&_finger&&_append&&_setInt&&_setSender&&_sender; }
+- (BOOL)literalTextReady { return _client&&_dispatch&&_unicode; }
 - (NSString *)status { return self.ready?@"symbols resolved; delivery unverified":@"waiting for HID APIs and a physical touchscreen event"; }
 - (NSDictionary *)diagnostics {
     return @{@"dispatch_client":IRBBool(_client!=NULL),@"monitor_client":IRBBool(_monitor!=NULL),
         @"touch_ready":IRBBool(self.ready),@"sender_observed":IRBBool(_sender!=0),
+        @"literal_text_ready":IRBBool(self.literalTextReady),@"literal_text_backend":@"IOHIDUnicode/UTF16LE",
         @"touch_reports_submitted":@(_touchReports),@"key_reports_submitted":@(_keyReports),
+        @"text_reports_submitted":@(_textReports),
         @"home_selector":IRBBool([UIApplication.sharedApplication respondsToSelector:NSSelectorFromString(@"_simulateHomeButtonPress")]||
                           [UIApplication.sharedApplication respondsToSelector:NSSelectorFromString(@"_simulateHomeButtonPressWithCompletion:")]),
         @"switcher_selector":IRBBool([UIApplication.sharedApplication respondsToSelector:NSSelectorFromString(@"_handleOpenAppSwitcherShortcut:")])};
@@ -190,6 +197,21 @@ static uint16_t asciiKey(unichar c,BOOL *shift) {
         if(shift) [self key:0xe1 down:NO];
         if(!ok) { [self releaseAll]; return NO; }
     } return YES;
+}
+- (BOOL)insertText:(NSString *)text {
+    if(!IRBValidLiteralText(text)) return NO;
+    if(!text.length) return YES;
+    if(!self.literalTextReady) return NO;
+    NSData *payload=[text dataUsingEncoding:NSUTF16LittleEndianStringEncoding allowLossyConversion:NO];
+    if(!payload) return NO;
+    // One literal Unicode event preserves surrogate pairs and grapheme clusters.
+    // Encoding 1 is UTF-16LE. Do not reuse a touch sender, send Return, or fall
+    // back to scancodes after dispatch: delivery is asynchronous and unverified.
+    Event event=_unicode(kCFAllocatorDefault,mach_absolute_time(),payload.bytes,(uint32_t)payload.length,1,0);
+    if(!event) return NO;
+    _dispatch(_client,event); ++_textReports;
+    CFRelease(event);
+    return YES;
 }
 - (void)releaseAll {
     for(int i=0;i<10;++i) if(_down[i]) [self touch:i phase:2 x:_positions[i].x y:_positions[i].y];
