@@ -55,6 +55,8 @@ jobs:
           python3 -S - <<'PY'
           import json, pathlib, subprocess, sys
           root = pathlib.Path('extracted-package/var/jb/usr/lib/iosremotebridge').resolve()
+          assert root.is_dir(), 'Python backend missing from the rootless install path'
+          assert not pathlib.Path('extracted-package/var/jb/var/jb').exists(), 'Duplicated rootless prefix'
           messages = [
               {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2025-11-25'}},
               {'jsonrpc': '2.0', 'method': 'notifications/initialized'},
