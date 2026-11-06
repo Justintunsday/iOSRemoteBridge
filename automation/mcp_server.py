@@ -2,129 +2,108 @@
 import argparse
 import asyncio
 import base64
-import threading
 from typing import Annotated
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Image
 from mcp.server.mcpserver.exceptions import ToolError
-from mcp.types import ToolAnnotations
+from mcp.types import Tool as MCPTool, ToolAnnotations
 from pydantic import Field
-from .client import BridgeClient, BridgeError
+from .client import BridgeError
+from .mcp_tools import CATALOG, TOOLS, DeviceAdapter, screen_image, validate
 
 Coordinate = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
 Duration = Annotated[int, Field(ge=40, le=5000)]
-READ = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
-INPUT = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
-READ_OPS = {"get_device_info", "get_screen_frame", "get_orientation", "get_connection_status", "get_performance_stats"}
+class BridgeMCPServer(MCPServer):
+    async def list_tools(self):
+        return [MCPTool(**entry) for entry in TOOLS]
 
-class DeviceAdapter:
-    def __init__(self, config, control=False, factory=BridgeClient):
-        self.config, self.control, self.factory = config, control, factory
-        self.client = None
-        self.lock = threading.RLock()
+    async def call_tool(self, name, arguments, context=None):
+        try:
+            arguments = validate(name, arguments)
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
+        return await super().call_tool(name, arguments, context)
 
-    def request(self, op, **parameters):
-        if op not in READ_OPS and not self.control:
-            raise BridgeError("input disabled; start this adapter with --control on the unlocked paired iPhone")
-        with self.lock:
-            if self.client is None:
-                self.client = self.factory(self.config, control=self.control, timeout=60)
-                try: self.client.connect()
-                except BaseException:
-                    self.close()
-                    raise
-            try: return self.client.request(op, **parameters)
-            except BridgeError:
-                if getattr(self.client, "error", None): self.close()
-                raise  # Never replay a failed/ambiguous action.
-
-    def close(self):
-        client, self.client = self.client, None
-        if client: client.close()
 
 def create_server(adapter):
-    server = MCPServer("iOSRemoteBridge")
+    server = BridgeMCPServer("iOSRemoteBridge")
+
+    def register(function):
+        spec = CATALOG[function.__name__]
+        return server.tool(description=spec["description"],
+                           annotations=ToolAnnotations(**spec["annotations"]))(function)
 
     async def request(op, **parameters):
         try: return await asyncio.to_thread(adapter.request, op, **parameters)
         except (BridgeError, OSError, ValueError) as exc: raise ToolError(str(exc)) from exc
 
-    @server.tool(annotations=READ)
+    @register
     async def get_device_info() -> dict:
         """Inspect device model, iOS, capture dimensions and runtime capability status. First call connects to the unlocked paired phone."""
         return await request("get_device_info")
 
-    @server.tool(annotations=READ)
+    @register
     async def get_screen_frame() -> Image:
         """Inspect a current JPEG screen frame during an paired session. Protected output is not bypassed."""
         result = await request("get_screen_frame")
-        if result["mime"] != "image/jpeg": raise BridgeError("unexpected screen image type")
-        return Image(data=base64.b64decode(result["base64"], validate=True), format="jpeg")
+        return Image(data=base64.b64decode(screen_image(result), validate=True), format="jpeg")
 
-    @server.tool(annotations=READ)
+    @register
     async def get_orientation() -> dict:
         """Read capture-plane orientation metadata; coordinates are natural portrait normalized values."""
         return await request("get_orientation")
 
-    @server.tool(annotations=READ)
+    @register
     async def get_connection_status() -> dict:
         """Inspect this adapter's local session status without connecting."""
-        client = adapter.client
-        return {"connected": client is not None and not getattr(client, "error", None),
-                "device": client.device if client else None, "input_requested": adapter.control}
+        return await request("get_connection_status")
 
-    @server.tool(annotations=READ)
+    @register
     async def get_performance_stats() -> dict:
         """Read periodic capture/encode/ack/thermal telemetry. This does not measure glass-to-glass latency."""
         return await request("get_performance_stats")
 
-    @server.tool(annotations=INPUT)
+    @register
     async def tap(x: Coordinate, y: Coordinate) -> dict:
         """Tap a normalized natural-portrait point. Requires a paired control session."""
         return await request("tap", x=x, y=y)
 
-    @server.tool(annotations=INPUT)
+    @register
     async def double_tap(x: Coordinate, y: Coordinate) -> dict:
         """Double tap a point in the paired control session."""
         return await request("double_tap", x=x, y=y)
 
-    @server.tool(annotations=INPUT)
+    @register
     async def long_press(x: Coordinate, y: Coordinate, duration_ms: Duration = 600) -> dict:
         """Hold one point, then release. Completion reports scheduling, not semantic UI success."""
         return await request("long_press", x=x, y=y, duration_ms=duration_ms)
 
-    @server.tool(annotations=INPUT)
+    @register
     async def swipe(x: Coordinate, y: Coordinate, to_x: Coordinate, to_y: Coordinate, duration_ms: Duration = 400) -> dict:
         """Swipe in the natural portrait coordinate plane. Never automatically retry after an ambiguous failure."""
         return await request("swipe", x=x, y=y, to_x=to_x, to_y=to_y, duration_ms=duration_ms)
 
-    @server.tool(annotations=INPUT)
+    @register
     async def insert_text(text: Annotated[str, Field(max_length=1024)]) -> dict:
         """Insert literal Unicode into the observed focused field, bypassing IME composition. Prefer this for Chinese, emoji and ordinary text. Maximum 1024 UTF-16 units. Does not press Return or enable keyboard mode; never retry an ambiguous result."""
-        try:
-            units = len(text.encode("utf-16-le")) // 2
-        except UnicodeError as exc:
-            raise ToolError("text must contain valid Unicode") from exc
-        if units > 1024:
-            raise ToolError("text exceeds 1024 UTF-16 code units")
         return await request("insert_text", text=text)
 
-    @server.tool(annotations=INPUT)
+    @register
     async def type_text(text: Annotated[str, Field(max_length=1024)]) -> dict:
         """Legacy US-layout ASCII key simulation; affected by the active IME. Prefer insert_text for literal text. Executes in the paired control session."""
         return await request("type_text", text=text)
 
-    @server.tool(annotations=INPUT)
+    @register
     async def press_home() -> dict:
         """Submit a Home button press in the paired control session."""
         return await request("press_home")
 
-    @server.tool(annotations=INPUT)
+    @register
     async def launch_app(bundle_id: Annotated[str, Field(min_length=1, max_length=255)]) -> dict:
         """Request launching an installed app. Executes directly; private API is experimental."""
         return await request("launch_app", bundle_id=bundle_id)
 
-    @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
+    @register
     async def disconnect() -> dict:
         """Close this adapter's session and cancel further screen/input access."""
         await asyncio.to_thread(adapter.close)

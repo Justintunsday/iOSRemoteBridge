@@ -80,6 +80,24 @@ the only pairing argument.
 
 ## Standard MCP adapter
 
+For Python 3.9 on a jailbroken phone, or a host without the optional SDK, use the
+dependency-free entry point:
+
+```sh
+python3 -m automation.mcp_stdio --config /absolute/private/client-config.json
+```
+
+It exposes the same 14 tool names as the SDK entry below, using a shared catalog
+and device adapter for validation, lazy connection, input gating and session
+cleanup. Both return native MCP image content and never replay ambiguous input.
+The rootless package also installs these Python modules under
+`/var/jb/usr/lib/iosremotebridge`. Python is optional for the native daemon.
+
+For [OpenCode iOS](https://github.com/Justintunsday/opencode-ios), the optional
+[Control Bridge setup and doctor](https://github.com/Justintunsday/ios-control-bridge/blob/main/docs/opencode-integration.md)
+merge configuration and instructions, distinguish local system services from
+remote visual tools and verify discovery without opening a phone session.
+
 Install the optional pinned official Python SDK and launch the stdio server:
 
 ```powershell

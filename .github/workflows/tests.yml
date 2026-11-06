@@ -7,6 +7,17 @@ on:
 permissions:
   contents: read
 jobs:
+  stdlib:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python: ['3.9', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -S -m unittest discover -s automation/tests -v
   portable:
     strategy:
       matrix:

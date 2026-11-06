@@ -2,7 +2,7 @@ name: build-ios
 on:
   push:
     branches: [main, 'feature/**', 'codex/**']
-    paths: ['ios/**', 'shared/**', '.github/workflows/build-ios.yml']
+    paths: ['ios/**', 'shared/**', 'automation/**', '.github/workflows/build-ios.yml']
   pull_request:
   workflow_dispatch:
 permissions:
@@ -50,7 +50,21 @@ jobs:
           dpkg-deb --contents ios/packages/*.deb | tee build-logs/package-files.txt
           grep -q 'var/jb/usr/bin/iosremotebridged' build-logs/package-files.txt
           grep -q 'var/jb/Library/MobileSubstrate/DynamicLibraries/IRBSpringBoard.dylib' build-logs/package-files.txt
+          grep -q 'var/jb/usr/lib/iosremotebridge/automation/mcp_stdio.py' build-logs/package-files.txt
           dpkg-deb --extract ios/packages/*.deb extracted-package
+          python3 -S - <<'PY'
+          import json, pathlib, subprocess, sys
+          root = pathlib.Path('extracted-package/var/jb/usr/lib/iosremotebridge').resolve()
+          messages = [
+              {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2025-11-25'}},
+              {'jsonrpc': '2.0', 'method': 'notifications/initialized'},
+              {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list'},
+          ]
+          p = subprocess.run([sys.executable, '-S', '-m', 'automation.mcp_stdio', '--config', 'absent.json'],
+                             cwd=root, input='\n'.join(json.dumps(m) for m in messages)+'\n',
+                             capture_output=True, text=True, timeout=10, check=True)
+          assert len(json.loads(p.stdout.splitlines()[1])['result']['tools']) == 14
+          PY
           lipo -info extracted-package/var/jb/usr/bin/iosremotebridged | tee build-logs/daemon-architectures.txt
           lipo -info extracted-package/var/jb/Library/MobileSubstrate/DynamicLibraries/IRBSpringBoard.dylib | tee build-logs/bridge-architectures.txt
           grep -q 'arm64e' build-logs/bridge-architectures.txt

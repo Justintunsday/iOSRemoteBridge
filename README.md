@@ -34,6 +34,8 @@ records the relative mouse correction and its physical test results.
   navigation shortcuts, captured native iOS relative mouse/keyboard input, reconnect and
   FPS/RTT/decode statistics.
 - Python API/CLI, JSON-lines adapter and optional standard MCP stdio tools.
+- Python 3.9-compatible stdlib MCP, sharing 14 tool names and validation with
+  the SDK adapter; optional [OpenCode/iosctl integration](https://github.com/Justintunsday/ios-control-bridge/blob/main/docs/opencode-integration.md).
 - GitHub Actions builds, TLS/H.264 simulator tests, validation, logs/artifacts
   and a manually gated draft-release workflow.
 
