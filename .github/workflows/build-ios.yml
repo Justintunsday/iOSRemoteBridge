@@ -2,7 +2,7 @@ name: build-ios
 on:
   push:
     branches: [main, 'feature/**', 'codex/**']
-    paths: ['ios/**', 'shared/**', 'automation/**', '.github/workflows/build-ios.yml']
+    paths: ['ios/**', 'shared/**', 'automation/**', 'skills/**', '.github/workflows/build-ios.yml']
   pull_request:
   workflow_dispatch:
 permissions:
@@ -51,11 +51,14 @@ jobs:
           grep -q 'var/jb/usr/bin/iosremotebridged' build-logs/package-files.txt
           grep -q 'var/jb/Library/MobileSubstrate/DynamicLibraries/IRBSpringBoard.dylib' build-logs/package-files.txt
           grep -q 'var/jb/usr/lib/iosremotebridge/automation/mcp_stdio.py' build-logs/package-files.txt
+          grep -q 'var/jb/usr/lib/iosremotebridge/skills/ios-computer-use/SKILL.md' build-logs/package-files.txt
+          grep -q 'var/jb/usr/lib/iosremotebridge/skills/ios-computer-use/references/backend.md' build-logs/package-files.txt
           dpkg-deb --extract ios/packages/*.deb extracted-package
           python3 -S - <<'PY'
           import json, pathlib, subprocess, sys
           root = pathlib.Path('extracted-package/var/jb/usr/lib/iosremotebridge').resolve()
           assert root.is_dir(), 'Python backend missing from the rootless install path'
+          assert (root / 'skills/ios-computer-use/SKILL.md').read_text().startswith('---\nname: ios-computer-use\n')
           assert not pathlib.Path('extracted-package/var/jb/var/jb').exists(), 'Duplicated rootless prefix'
           messages = [
               {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2025-11-25'}},

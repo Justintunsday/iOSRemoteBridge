@@ -8,6 +8,8 @@ include $(THEOS_MAKE_PATH)/aggregate.mk
 # Optional Python client, shared by desktop OpenCode and Python 3.9 on iOS.
 # A fixed source inventory excludes tests, caches and private pairing files.
 IRB_AUTOMATION_FILES = __init__.py __main__.py client.py protocol.py mcp_tools.py mcp_stdio.py mcp_server.py
+IRB_SKILL_FILES = SKILL.md agents/openai.yaml references/backend.md
 after-stage::
 	mkdir -p "$(THEOS_STAGING_DIR)/usr/lib/iosremotebridge/automation"
 	for file in $(IRB_AUTOMATION_FILES); do install -m 0644 "$(THEOS_PROJECT_DIR)/../automation/$$file" "$(THEOS_STAGING_DIR)/usr/lib/iosremotebridge/automation/"; done
+	for file in $(IRB_SKILL_FILES); do mkdir -p "$(THEOS_STAGING_DIR)/usr/lib/iosremotebridge/skills/ios-computer-use/$$(dirname "$$file")"; install -m 0644 "$(THEOS_PROJECT_DIR)/../skills/ios-computer-use/$$file" "$(THEOS_STAGING_DIR)/usr/lib/iosremotebridge/skills/ios-computer-use/$$file"; done

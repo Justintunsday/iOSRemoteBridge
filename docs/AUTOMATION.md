@@ -93,8 +93,13 @@ cleanup. Both return native MCP image content and never replay ambiguous input.
 The rootless package also installs these Python modules under
 `/var/jb/usr/lib/iosremotebridge`. Python is optional for the native daemon.
 
+The complete portable [Computer Use skill](../skills/ios-computer-use/SKILL.md)
+is bundled at `/var/jb/usr/lib/iosremotebridge/skills/ios-computer-use`, including
+its backend reference and client metadata. Clients can reference this directory
+without downloading another skill; package installation preserves user configuration.
+
 For [OpenCode iOS](https://github.com/Justintunsday/opencode-ios), the optional
-[Control Bridge setup and doctor](https://github.com/Justintunsday/ios-control-bridge/blob/main/docs/opencode-integration.md)
+[Control API setup and doctor](https://github.com/Justintunsday/ios-control-bridge/blob/main/docs/opencode-integration.md)
 merge configuration and instructions, distinguish local system services from
 remote visual tools and verify discovery without opening a phone session.
 
